@@ -38,6 +38,23 @@ def parse_databricks_notebook(filepath):
             
             md_content = '\n'.join(md_lines)
             cells.append({'type': 'markdown', 'content': md_content})
+        elif '# MAGIC %scala' in section:
+            # Extract Scala code content
+            lines = section.split('\n')
+            scala_lines = []
+            for line in lines:
+                if line.startswith('# MAGIC %scala'):
+                    continue
+                elif line.startswith('# MAGIC '):
+                    # Remove '# MAGIC '
+                    scala_lines.append(line[8:])
+                elif line.startswith('# MAGIC'):
+                    # Remove '# MAGIC'
+                    scala_lines.append(line[7:])
+            
+            scala_content = '\n'.join(scala_lines).strip()
+            if scala_content:
+                cells.append({'type': 'scala', 'content': scala_content})
         else:
             # This is a code cell
             # Remove any leading comments that aren't actual code
@@ -90,6 +107,20 @@ def convert_to_html_fragment(filepath):
 </div>
 </div>
 </div>''')
+        elif cell['type'] == 'scala':
+            # Create Scala code cell with proper syntax highlighting
+            escaped_code = html.escape(cell['content'])
+            html_content.append(f'''<div class="cell border-box-sizing code_cell rendered">
+<div class="input">
+<div class="inner_cell">
+<div class="input_area">
+<div class="highlight hl-scala">
+<pre class="language-scala"><code class="language-scala">{escaped_code}</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>''')
     
     # Return just the content fragment (no full HTML document)
     fragment_content = '\n'.join(html_content)
@@ -103,12 +134,13 @@ def convert_to_html_fragment(filepath):
 
 
 if __name__ == "__main__":
-    # Process all .py files in notebooks directory
+    # Process all .py files in src directory (your notebooks are there)
     notebook_data = {}
-    for py_file in glob.glob('notebooks/*.py'):
-        name, fragment = convert_to_html_fragment(py_file)
-        notebook_data[name] = fragment
-        print(f"Converted {py_file} to HTML fragment")
+    for py_file in glob.glob('src/*.py'):
+        if not py_file.endswith('__init__.py'):  # Skip __init__.py files
+            name, fragment = convert_to_html_fragment(py_file)
+            notebook_data[name] = fragment
+            print(f"Converted {py_file} to HTML fragment")
     
     # Write notebook data to a JSON file for the main script
     import json

@@ -39,14 +39,18 @@ jobs:
         run: |
           mkdir -p site
           
-          # Convert .ipynb notebooks to HTML fragments (body content only)
-          for notebook in notebooks/*.ipynb; do
-              if [ -f "$notebook" ]; then
-                  jupyter nbconvert "$notebook" --to html \
-                    --template classic --HTMLExporter.theme=light \
-                    --no-prompt --stdout > "temp_$(basename "$notebook" .ipynb).html"
-              fi
-          done
+          # Convert .ipynb notebooks to HTML fragments (body content only) - if any exist
+          if ls notebooks/*.ipynb 1> /dev/null 2>&1; then
+            for notebook in notebooks/*.ipynb; do
+                if [ -f "$notebook" ]; then
+                    jupyter nbconvert "$notebook" --to html \
+                      --template classic --HTMLExporter.theme=light \
+                      --no-prompt --stdout > "temp_$(basename "$notebook" .ipynb).html"
+                fi
+            done
+          else
+            echo "No .ipynb notebooks found, skipping jupyter nbconvert"
+          fi
           
           # Convert .py Databricks notebooks to HTML fragments
           chmod +x .github/scripts/convert_notebooks.py
