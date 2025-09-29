@@ -10,11 +10,7 @@ variables:
   volume_path:
     default: "/Volumes/${var.catalog}/default/regulatory_data"
 
-  schema_spark_version:
-    default: "16.4.x-scala2.12"
-    
-  schema_node_type:
-    default: "Standard_D4ds_v5"
+  # Removed schema_spark_version and schema_node_type - now using serverless compute
     
   emir_max_concurrent_runs:
     default: 10

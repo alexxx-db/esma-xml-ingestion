@@ -9,14 +9,14 @@ resources:
       tasks:
         - task_key: emir_xml_load
           notebook_task:
-            notebook_path: ../src/1_xml_file_loader_body.ipynb
+            notebook_path: ../src/1_xml_file_loader_body.py
             source: WORKSPACE
             
         - task_key: emir_xml_flatten
           depends_on:
             - task_key: emir_xml_load
           notebook_task:
-            notebook_path: ../src/2_flatten_explode_table.ipynb
+            notebook_path: ../src/2_flatten_explode_table.py
             source: WORKSPACE
             
       queue:
@@ -52,14 +52,8 @@ resources:
       
       tasks:
         - task_key: emir_schema_generation
-          new_cluster:
-            is_single_node: true
-            data_security_mode: STANDARD
-            kind: CLASSIC_PREVIEW
-            spark_version: "${var.schema_spark_version}"
-            node_type_id: "${var.schema_node_type}"
           notebook_task:
-            notebook_path: ../src/0_1_xml_schema_xsd.ipynb
+            notebook_path: ../src/0_1_xml_schema_xsd.py
             source: WORKSPACE
             
       queue:
