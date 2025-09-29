@@ -1,0 +1,236 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # XML Schema XSD Processing
+# MAGIC 
+# MAGIC This notebook creates JSON schemas and XSD files for XML processing
+
+# COMMAND ----------
+
+# MAGIC %load_ext autoreload
+# MAGIC %autoreload 2
+# Enables autoreload; learn more at https://docs.databricks.com/en/files/workspace-modules.html#autoreload-for-python-modules
+# To disable autoreload; run %autoreload 0
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Example Schema Mappings (Commented)
+
+# COMMAND ----------
+
+# schema_mappings = [ 
+#   {
+#   "field": "UVHeader",
+#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/Files_unavista_header_001_001_001.xsd",
+#   },
+#   {
+#   "field": "BizAppHeader",
+#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/Files_BizAppheader_001_001_01.xsd"
+#   },
+#   {
+#   "field": "Document",
+#   "file_path": "/Volumes/users/matthew_moorcroft/mifir/lseg_xsd/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd",
+#   "payload": True
+#   }
+# ]
+
+# COMMAND ----------
+
+# schema_mappings = [ 
+#   {
+#   "field": "Hdr",
+#   "file_path": "/Volumes/users/matthew_moorcroft/cbi/xsd/test/2 BusinessApplicationHeader 001.json",
+#   },
+#   {
+#   "field": "Pyld",
+#   "file_path": "/Volumes/users/matthew_moorcroft/cbi/xsd/test/EMIR_Refit-_Outgoing_auth_107_001_01_ESMAUG_DATTSR_1_1_0.json",
+#   "payload": True
+#   }
+# ]
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Schema Creation Job Parameters
+
+# COMMAND ----------
+
+# Schema Creation Job Parameters
+# This notebook creates JSON schemas and XSD files for XML processing
+
+# Declare parameters
+dbutils.widgets.text("schemas_path", "/Volumes/esma/default/regulatory_data/emir/schemas/")
+dbutils.widgets.text("master_xsd_path", "/Volumes/esma/default/regulatory_data/emir/xsd/master_schema.xsd")
+dbutils.widgets.text("payload_xsd_path", "/Volumes/esma/default/regulatory_data/emir/xsd/payload_schema.xsd")
+dbutils.widgets.text("row_tag", "Stat")
+dbutils.widgets.text("schema_mappings_json", '[{"field": "Hdr", "file_path": "/path/to/header.xsd"}, {"field": "Pyld", "file_path": "/path/to/payload.xsd", "payload": true}]')
+
+# COMMAND ----------
+
+import json
+
+schemas_path = dbutils.widgets.get("schemas_path")
+master_xsd_path = dbutils.widgets.get("master_xsd_path") 
+payload_xsd_path = dbutils.widgets.get("payload_xsd_path")
+row_tag = dbutils.widgets.get("row_tag")
+schema_mappings_json = dbutils.widgets.get("schema_mappings_json")
+
+# Parse schema mappings from JSON string
+schema_mappings = json.loads(schema_mappings_json)
+
+print(f"Schemas output path: {schemas_path}")
+print(f"Master XSD path: {master_xsd_path}")
+print(f"Payload XSD path: {payload_xsd_path}")  
+print(f"Row tag: {row_tag}")
+print(f"Using schema mappings from job parameters:")
+for mapping in schema_mappings:
+    print(f"  - {mapping['field']}: {mapping['file_path']}")
+    if mapping.get('payload'):
+        print(f"    (Payload field)")
+        payloadXsdPath = mapping['file_path']
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC // Get widget values
+# MAGIC val masterXsdPath = dbutils.widgets.get("master_xsd_path")
+# MAGIC val schemaPath = dbutils.widgets.get("schemas_path") 
+# MAGIC val payloadXsdPath = dbutils.widgets.get("payload_xsd_path")
+
+# COMMAND ----------
+
+# MAGIC %scala
+# MAGIC import org.apache.spark.sql.types._
+# MAGIC import org.apache.spark.sql.execution.datasources.xml.XSDToSchema
+# MAGIC import java.nio.file.{Files, Paths}
+# MAGIC import java.nio.charset.StandardCharsets
+# MAGIC 
+# MAGIC // Function to convert XSD to JSON schema
+# MAGIC def convertXsdToJson(xsdPath: String, outputJsonPath: String): Unit = {
+# MAGIC   try {
+# MAGIC     if (xsdPath.nonEmpty) {
+# MAGIC       println(s"Processing XSD: $xsdPath")
+# MAGIC       
+# MAGIC       // Read XSD file and convert to Spark schema
+# MAGIC       val xsdContent = scala.io.Source.fromFile(xsdPath).mkString
+# MAGIC       val schema = XSDToSchema.read(xsdContent)
+# MAGIC       
+# MAGIC       // Convert schema to JSON
+# MAGIC       val schemaJson = schema.json
+# MAGIC       
+# MAGIC       // Write JSON schema to file
+# MAGIC       Files.write(Paths.get(outputJsonPath), schemaJson.getBytes(StandardCharsets.UTF_8))
+# MAGIC       
+# MAGIC       println(s"✓ Schema converted and written to: $outputJsonPath")
+# MAGIC       println(s"  Schema has ${schema.fields.length} top-level fields")
+# MAGIC       
+# MAGIC     } else {
+# MAGIC       println(s"⚠ XSD path is empty, skipping conversion")
+# MAGIC     }
+# MAGIC   } catch {
+# MAGIC     case e: Exception => 
+# MAGIC       println(s"✗ Error converting XSD $xsdPath: ${e.getMessage}")
+# MAGIC       e.printStackTrace()
+# MAGIC   }
+# MAGIC }
+# MAGIC 
+# MAGIC println("=== XSD to JSON Schema Conversion ===")
+# MAGIC 
+# MAGIC // Convert each XSD file to JSON schema
+# MAGIC if (masterXsdPath.nonEmpty) {
+# MAGIC   val filename = masterXsdPath.split("/").last.replace(".xsd", ".json")
+# MAGIC   val outputPath = s"${schemaPath}${filename}"
+# MAGIC   convertXsdToJson(masterXsdPath, outputPath)
+# MAGIC }
+# MAGIC 
+# MAGIC import java.io.File
+# MAGIC 
+# MAGIC val xsdDir = new File(schemaPath)
+# MAGIC 
+# MAGIC println(xsdDir)
+# MAGIC if (xsdDir.exists && xsdDir.isDirectory) {
+# MAGIC   val xsdFiles = xsdDir.listFiles
+# MAGIC     .filter(f => f.isFile && f.getName.endsWith(".xsd"))
+# MAGIC     .filterNot(f => 
+# MAGIC       f.getName.equalsIgnoreCase(new File(masterXsdPath).getName) || 
+# MAGIC       f.getName.equalsIgnoreCase(new File(payloadXsdPath).getName)
+# MAGIC     )
+# MAGIC   xsdFiles.foreach { file =>
+# MAGIC     val filename = file.getName.replace(".xsd", ".json")
+# MAGIC     val outputPath = s"${schemaPath}${filename}"
+# MAGIC     convertXsdToJson(file.getAbsolutePath, outputPath)
+# MAGIC   }
+# MAGIC }
+# MAGIC 
+# MAGIC if (payloadXsdPath.nonEmpty) {
+# MAGIC   val filename = payloadXsdPath.split("/").last.replace(".xsd", ".json")
+# MAGIC   val outputPath = s"${schemaPath}${filename}"
+# MAGIC   convertXsdToJson(payloadXsdPath, outputPath)
+# MAGIC }
+# MAGIC println("=== Conversion Complete ===")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Create Specialized Schemas
+
+# COMMAND ----------
+
+from util.xsd_processor import create_specialized_schemas
+
+master_json_path = master_xsd_path.replace(".xsd", ".json")
+payload_json_path = payload_xsd_path.replace(".xsd", ".json")
+
+result = create_specialized_schemas(
+    master_json_path=master_json_path,
+    schema_mappings=schema_mappings,
+    row_tag_name=row_tag,
+    output_folder=schemas_path,
+    validate_schemas=True
+)
+
+if result["success"]:
+    print(f"✓ Created pyld_schema.json and hdr_pyld_metadata_schema.json")
+    pyld_schema_path = result['pyld_schema_path']
+    metadata_schema_path = result['metadata_schema_path']
+else:
+    print(f"✗ Error: {result['error']}")
+    pyld_schema_path = None
+    metadata_schema_path = None
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Create Row Tag XSD
+
+# COMMAND ----------
+
+import os
+from util.xsd_processor import create_row_tag_xsd
+
+row_tag_xsd_output = os.path.join(schemas_path, f"row_tag_schema.xsd")
+
+result = create_row_tag_xsd(
+    payload_xsd_path=payload_xsd_path,
+    row_tag_name=row_tag,
+    output_path=row_tag_xsd_output,
+    validate_output=True,
+)
+
+if result["success"]:
+    print(f"✅ Row tag XSD created successfully!")
+    print(f"   Output file: {os.path.basename(result['output_path'])}")
+    print(f"   Row tag element: {result['row_tag_element']}")
+    print(f"   Row tag type: {result['row_tag_type']}")
+    
+    # Check file size
+    file_size = os.path.getsize(row_tag_xsd_output)
+    print(f"   File size: {file_size:,} bytes")
+    
+    row_tag_xsd_path = result['output_path']
+    
+    print(f"\n💡 This XSD can be used with Spark XML processing:")
+    print(f"   spark.read.format('xml').option('row_tag', '{row_tag}').schema(...).load(...)")
+else:
+    print(f"❌ Row tag XSD creation failed: {result['error']}")
+    row_tag_xsd_path = None

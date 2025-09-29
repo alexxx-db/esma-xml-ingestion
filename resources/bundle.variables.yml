@@ -100,7 +100,7 @@ variables:
     default: "${var.volume_path}/mifir/processed/"
     
   mifir_row_tag:
-    default: "Transaction"
+    default: "Tx"
     
   mifir_xml_schema_hdr_pyld_metadata_path:
     default: "${var.volume_path}/mifir/schemas/hdr_pyld_metadata_schema.json"
@@ -125,4 +125,4 @@ variables:
     default: "${var.volume_path}/mifir/schemas/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd"
     
   mifir_schema_mappings_json:
-    default: '[{"field": "UVHeader", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/mifir/schemas/Files_unavista_header_001_001_001.xsd"}, {"field": "BizAppHeader", "file_path": "/Volumes//default/regulatory_data/mifir/schemas/Files_BizAppheader_001_001_01.xsd"}, {"field": "Document", "file_path": "/Volumes/esma/default/regulatory_data/mifir/schemas/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd", "payload": true}]' 
+    default: '[{"field": "UVHeader", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/mifir/schemas/Files_unavista_header_001_001_001.xsd"}, {"field": "BizAppHeader", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/mifir/schemas/Files_BizAppheader_001_001_01.xsd"}, {"field": "Document", "file_path": "/Volumes/${var.catalog}/default/regulatory_data/mifir/schemas/PayloadDocument_auth_016_001_01_ESMAUG_Reporting_1_1_0.xsd", "payload": true}]' 
