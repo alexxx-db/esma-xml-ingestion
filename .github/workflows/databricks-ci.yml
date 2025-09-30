@@ -1,16 +1,20 @@
 name: Databricks Asset Bundles CI
 
 on:
-  pull_request:
-    branches:
-      - main
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - prod
 
 jobs:
   validate-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: html_publisher
 
     steps:
       - name: Checkout code
@@ -35,21 +39,22 @@ jobs:
 
       - name: Set environment variables
         run: |
-          echo "DEPLOY_ENV=dev" >> $GITHUB_ENV
+          echo "DEPLOY_ENV=${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_ENV
 
       - name: Validate bundle configuration
         run: |
-          echo "Validating Databricks Asset Bundle..."
-          databricks bundle validate --target dev
+          echo "Validating Databricks Asset Bundle for ${{ env.DEPLOY_ENV }} environment..."
+          databricks bundle validate --target ${{ env.DEPLOY_ENV }}
 
-      - name: Deploy bundle (on main branch)
-        if: github.ref == 'refs/heads/main'
+      - name: Deploy bundle
         run: |
-          echo "Deploying to development environment..."
-          databricks bundle deploy --target dev
+          echo "Deploying to ${{ env.DEPLOY_ENV }} environment..."
+          databricks bundle deploy --target ${{ env.DEPLOY_ENV }}
 
-      - name: Cleanup PR deployment (on PR close)
-        if: github.event_name == 'pull_request' && github.event.action == 'closed'
+      - name: Run jobs (optional)
+        if: github.event.inputs.environment == 'dev'
         run: |
-          echo "Cleaning up PR deployment..."
-          databricks bundle destroy --target dev || true
+          echo "Running test jobs in development environment..."
+          # Uncomment to run specific jobs:
+          # databricks bundle run EMIR_XML_Processing --target dev
+          # databricks bundle run MiFIR_XML_Processing --target dev
