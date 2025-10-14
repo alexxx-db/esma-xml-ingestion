@@ -315,7 +315,7 @@ jobs:
           </head>
           <body>
               <div class="header">
-                  <img src="https://databricks-prod-cloudfront.cloud.databricks.com/static/811f68f9f55e3a5330b6e6ae1e54c07fc5ec7224f15be529de3400226e2eca3a/db-nav-logo.svg" 
+                  <img src="https://databricks-prod-cloudfront.cloud.databricks.com/static/ddd080df888c63d3c68438635badd32f0c91e40f31fe8fa2ed73da63df3598e3/media/databricks.a424ad6e.svg" 
                        class="logo" alt="Databricks">
                   <div class="title">{title}</div>
                   <a href="{os.environ.get('GITHUB_SERVER_URL', '')}/{os.environ.get('GITHUB_REPOSITORY', '')}" 
