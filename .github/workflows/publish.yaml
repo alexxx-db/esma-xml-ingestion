@@ -428,9 +428,13 @@ jobs:
                   # Add sub-navigation for notebook sections
                   if name in notebook_headers and notebook_headers[name]:
                       for header in notebook_headers[name]:
-                          indent = '  ' * (header['level'] - 1)
-                          icon = '📄' if header['level'] == 2 else '•'
-                          html += f'\n            <a href="#{header[\'id\']}" class="nav-link subsection" style="padding-left: {12 + header[\'level\'] * 8}px;">{indent}{icon} {header[\'text\']}</a>'
+                          header_id = header['id']
+                          header_level = header['level']
+                          header_text = header['text']
+                          indent = '  ' * (header_level - 1)
+                          icon = '📄' if header_level == 2 else '•'
+                          padding = 12 + header_level * 8
+                          html += f'\n            <a href="#{header_id}" class="nav-link subsection" style="padding-left: {padding}px;">{indent}{icon} {header_text}</a>'
           
           html += f'''
                   </div>
