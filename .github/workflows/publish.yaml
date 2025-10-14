@@ -502,7 +502,7 @@ jobs:
                       // Update active state
                       navLinks.forEach(link => {{
                           link.classList.remove('active');
-                          if (currentSection && link.getAttribute('href') === `#${{currentSection.id}}`) {{
+                          if (currentSection && link.getAttribute('href') === '#' + currentSection.id) {{
                               link.classList.add('active');
                           }}
                       }});
