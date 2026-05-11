@@ -92,3 +92,86 @@ def xsd_error(xml_str: str, xsd_path: str) -> str:
         return "XML is valid"
     except Exception as e:
         return f"Invalid XML: {str(e)}"
+
+
+# --------------------------------------------------------------------------
+# Header-extraction UDF.
+#
+# Reads the XML file via lxml.iterparse, stops at the first row-tag
+# element, strips empty elements, and returns the header-only XML as a
+# string. Lenient on failure (returns None) — preserving today's
+# notebook behavior. A dp.expect on the parsed header struct is a
+# deliberate follow-up, not part of this branch.
+# --------------------------------------------------------------------------
+
+
+def _strip_namespace(tag: str) -> str:
+    """Strip ``{ns}name`` prefix from an lxml tag."""
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _remove_empty_elements(element) -> bool:
+    """Recursively drop elements that have no children, attributes, or text."""
+    children_to_remove = []
+    for child in list(element):
+        if _remove_empty_elements(child):
+            children_to_remove.append(child)
+    for child in children_to_remove:
+        element.remove(child)
+    has_children = len(list(element)) > 0
+    has_attributes = bool(element.attrib)
+    has_meaningful_text = (
+        (element.text and element.text.strip())
+        or (element.tail and element.tail.strip())
+    )
+    return not has_children and not has_attributes and not has_meaningful_text
+
+
+def _extract_hdr_pyld_metadata(file_path: str, row_tag: str) -> str | None:
+    """Return the header-only XML for a single file, stopping at row_tag."""
+    from lxml import etree
+    try:
+        context = etree.iterparse(file_path, events=("start", "end"), recover=True)
+        element_stack = []
+        skip_depth = 0
+        root = None
+        found_row_tag = False
+
+        for event, elem in context:
+            tag_name = _strip_namespace(elem.tag)
+            if event == "start":
+                if tag_name == row_tag and not found_row_tag:
+                    found_row_tag = True
+                    elem.clear()
+                    break
+                should_skip = (skip_depth > 0) or (tag_name == row_tag)
+                if should_skip:
+                    skip_depth += 1
+                else:
+                    new_elem = etree.Element(elem.tag, attrib=elem.attrib)
+                    new_elem.tag = _strip_namespace(new_elem.tag)
+                    if element_stack:
+                        element_stack[-1].append(new_elem)
+                    else:
+                        root = new_elem
+                    element_stack.append(new_elem)
+            elif event == "end":
+                if skip_depth > 0:
+                    skip_depth -= 1
+                elif element_stack:
+                    current_elem = element_stack.pop()
+                    current_elem.text = elem.text
+                    current_elem.tail = elem.tail
+                elem.clear()
+
+        if root is not None:
+            _remove_empty_elements(root)
+            return etree.tostring(root, encoding="unicode", pretty_print=True)
+        return None
+    except Exception as e:
+        # Lenient: failure surfaces as null hdr_pyld_metadata downstream.
+        print(f"Error processing {file_path}: {e}")
+        return None
+
+
+extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
