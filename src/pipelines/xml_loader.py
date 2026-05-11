@@ -337,3 +337,53 @@ def quarantine():
             "xsd_validation_result",
         )
     )
+
+
+# --------------------------------------------------------------------------
+# Table 4 of 4: {prefix}_raw (PUBLIC — drop-in for the flatten notebook)
+#
+# Watermarked stream-stream join of good payload rows with file-level
+# headers on file_path. State is bounded by in-flight file count, not
+# row count, because both sides watermark on _file_modification_time.
+# Output preserves the column contract consumed by
+# src/notebooks/2_flatten_explode_table.py.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_RAW,
+    comment=(
+        "Public: per-row payload joined with per-file header metadata. "
+        "Drop-in replacement for the output of the legacy "
+        "1_xml_file_loader_body.py notebook; consumed by the flatten step."
+    ),
+    cluster_by=["AUTO"],
+)
+def raw():
+    payload = (
+        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
+        .filter(F.col("corrupted_record").isNull())
+        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
+    )
+    headers = (
+        spark.readStream.table(TBL_FILE_HDR_METADATA)
+        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
+    )
+    # Right-side join columns are aliased to avoid duplicate column names
+    # on file_path / file_name / _file_modification_time after the join.
+    headers_aliased = headers.select(
+        F.col("file_path").alias("_hdr_file_path"),
+        "hdr_pyld_metadata",
+        "FileBatchIndex",
+        "FileBatchSize",
+        "FileVersion",
+        "ESMADate",
+    )
+    return (
+        payload.join(
+            headers_aliased,
+            payload["file_path"] == headers_aliased["_hdr_file_path"],
+            "inner",
+        )
+        .drop("_hdr_file_path", "corrupted_record", "rescued_data")
+    )
