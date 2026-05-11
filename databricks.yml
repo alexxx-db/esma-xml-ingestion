@@ -4,6 +4,7 @@ bundle:
 include:
   - resources/**/*.yml
   - resources/*.yml
+  - resources/config/local/*.yml
 
 targets:
   dev:
