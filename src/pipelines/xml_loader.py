@@ -193,7 +193,7 @@ extract_hdr_pyld_metadata_udf = F.udf(_extract_hdr_pyld_metadata, StringType())
         f"{TBL_FILE_HDR_METADATA}, {TBL_QUARANTINE}, and {TBL_RAW} consume "
         "this."
     ),
-    cluster_by=["AUTO"],
+    cluster_by_auto=True,
 )
 def raw_xml_payload():
     return (
@@ -237,7 +237,7 @@ _ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
         "and filename-regex columns. Consumed by "
         f"{TBL_RAW} for the per-row enrichment join."
     ),
-    cluster_by=["AUTO"],
+    cluster_by_auto=True,
 )
 def file_hdr_metadata():
     return (
@@ -317,7 +317,7 @@ def file_hdr_metadata():
         "Public: malformed XML rows that failed Auto Loader XSD validation, "
         "enriched with xsd_validation_result (human-readable lxml error)."
     ),
-    cluster_by=["AUTO"],
+    cluster_by_auto=True,
 )
 def quarantine():
     return (
@@ -357,7 +357,7 @@ def quarantine():
         "Drop-in replacement for the output of the legacy "
         "1_xml_file_loader_body.py notebook; consumed by the flatten step."
     ),
-    cluster_by=["AUTO"],
+    cluster_by_auto=True,
 )
 def raw():
     payload = (
