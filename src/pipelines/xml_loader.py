@@ -214,3 +214,88 @@ def raw_xml_payload():
         )
         .withColumn("_ingested_at", F.current_timestamp())
     )
+
+
+# --------------------------------------------------------------------------
+# Table 2 of 4: {prefix}_file_hdr_metadata (intermediate — internal use)
+#
+# One row per file. Built from good rows of raw_xml_payload via
+# watermark + dropDuplicatesWithinWatermark on file_path so the UDFs
+# fire once per file per trigger. Header XML is extracted with lxml
+# and parsed via from_xml using the pre-loaded JSON schema. Filename
+# regex extracts FileBatchIndex / Size / Version / ESMADate.
+# --------------------------------------------------------------------------
+
+_FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
+_ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
+
+
+@dp.table(
+    name=TBL_FILE_HDR_METADATA,
+    comment=(
+        "Internal: one row per source XML file with parsed header struct "
+        "and filename-regex columns. Consumed by "
+        f"{TBL_RAW} for the per-row enrichment join."
+    ),
+    cluster_by=["AUTO"],
+)
+def file_hdr_metadata():
+    return (
+        spark.readStream.table(TBL_RAW_XML_PAYLOAD)
+        .filter(F.col("corrupted_record").isNull())
+        .withWatermark("_file_modification_time", WATERMARK_INTERVAL)
+        .dropDuplicatesWithinWatermark(["file_path"])
+        .select(
+            "file_path",
+            "file_name",
+            "_file_modification_time",
+            extract_hdr_pyld_metadata_udf(
+                F.col("file_path"), F.lit(ROW_TAG)
+            ).alias("_hdr_xml"),
+        )
+        .withColumn(
+            "hdr_pyld_metadata",
+            F.from_xml(F.col("_hdr_xml"), XML_HDR_PYLD_METADATA_SCHEMA),
+        )
+        .drop("_hdr_xml")
+        .withColumn(
+            "FileBatchIndex",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                1, 3,
+            ),
+        )
+        .withColumn(
+            "FileBatchSize",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                4, 3,
+            ),
+        )
+        .withColumn(
+            "FileVersion",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                8, 1,
+            ),
+        )
+        .withColumn(
+            "ESMADate",
+            F.concat(
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    2, 2,
+                ),
+                F.lit("-"),
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    4, 2,
+                ),
+                F.lit("-"),
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    6, 2,
+                ),
+            ),
+        )
+    )
