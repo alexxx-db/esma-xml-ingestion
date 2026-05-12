@@ -296,19 +296,104 @@ def trade_schedule():
 )
 def trade():
     src = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    cp = "CtrPtySpcfcData.CtrPty"
+    txd = "CmonTradData.TxData"
+    cd = "CmonTradData.CtrctData"
     return src.select(
         # === Identification ===
-        F.col("CmonTradData.TxData.TxId.UnqTxIdr").alias("trade_id"),
-        F.col("CmonTradData.TxData.TxId.Prtry.Id").alias("trade_id_proprietary"),
-        F.col("CmonTradData.TxData.PrrTxId.UnqTxIdr").alias("prior_trade_id"),
-        F.col("CmonTradData.TxData.PrrTxId.Prtry.Id").alias("prior_trade_id_proprietary"),
-        F.col("CmonTradData.TxData.PrrTxId.NotAvlbl").alias("prior_trade_id_not_available"),
-        F.col("CmonTradData.TxData.SbsqntTxId.UnqTxIdr").alias("subsequent_trade_id"),
-        F.col("CmonTradData.TxData.SbsqntTxId.Prtry.Id").alias("subsequent_trade_id_proprietary"),
-        F.col("CmonTradData.TxData.SbsqntTxId.NotAvlbl").alias("subsequent_trade_id_not_available"),
-        F.col("CmonTradData.TxData.RptTrckgNb").alias("report_tracking_number"),
-        F.col("CmonTradData.TxData.PltfmIdr").alias("platform_id"),
-        # === Audit / lineage (added early so the function returns a real DF) ===
+        F.col(f"{txd}.TxId.UnqTxIdr").alias("trade_id"),
+        F.col(f"{txd}.TxId.Prtry.Id").alias("trade_id_proprietary"),
+        F.col(f"{txd}.PrrTxId.UnqTxIdr").alias("prior_trade_id"),
+        F.col(f"{txd}.PrrTxId.Prtry.Id").alias("prior_trade_id_proprietary"),
+        F.col(f"{txd}.PrrTxId.NotAvlbl").alias("prior_trade_id_not_available"),
+        F.col(f"{txd}.SbsqntTxId.UnqTxIdr").alias("subsequent_trade_id"),
+        F.col(f"{txd}.SbsqntTxId.Prtry.Id").alias("subsequent_trade_id_proprietary"),
+        F.col(f"{txd}.SbsqntTxId.NotAvlbl").alias("subsequent_trade_id_not_available"),
+        F.col(f"{txd}.RptTrckgNb").alias("report_tracking_number"),
+        F.col(f"{txd}.PltfmIdr").alias("platform_id"),
+
+        # === Reporting counterparty (CtrPty.RptgCtrPty) ===
+        F.col(f"{cp}.RptgCtrPty.Id.Lgl.Id.LEI").alias("reporter_lei"),
+        F.col(f"{cp}.RptgCtrPty.Id.Lgl.Id.Othr.Id.Id").alias("reporter_other_id"),
+        F.when(F.col(f"{cp}.RptgCtrPty.Ntr.FI").isNotNull(), F.lit("FI"))
+         .when(F.col(f"{cp}.RptgCtrPty.Ntr.NFI").isNotNull(), F.lit("NFI"))
+         .when(F.col(f"{cp}.RptgCtrPty.Ntr.CntrlCntrPty").isNotNull(), F.lit("CCP"))
+         .when(F.col(f"{cp}.RptgCtrPty.Ntr.Othr").isNotNull(), F.lit("OTHR"))
+         .alias("reporter_nature"),
+        F.coalesce(
+            F.transform(F.col(f"{cp}.RptgCtrPty.Ntr.FI.Sctr"), lambda x: x["Cd"]),
+            F.transform(F.col(f"{cp}.RptgCtrPty.Ntr.NFI.Sctr"), lambda x: x["Id"]),
+        ).alias("reporter_sectors"),
+        F.coalesce(
+            F.col(f"{cp}.RptgCtrPty.Ntr.FI.ClrThrshld"),
+            F.col(f"{cp}.RptgCtrPty.Ntr.NFI.ClrThrshld"),
+        ).alias("reporter_clr_threshold"),
+        F.col(f"{cp}.RptgCtrPty.Ntr.NFI.DrctlyLkdActvty").alias("reporter_nfi_directly_linked_activity"),
+        F.col(f"{cp}.RptgCtrPty.Ntr.CntrlCntrPty").isNotNull().alias("reporter_is_central_counterparty"),
+        F.col(f"{cp}.RptgCtrPty.TradgCpcty").alias("reporter_trading_capacity"),
+        F.col(f"{cp}.RptgCtrPty.DrctnOrSd.Drctn.DrctnOfTheFrstLeg").alias("reporter_direction_first_leg"),
+        F.col(f"{cp}.RptgCtrPty.DrctnOrSd.Drctn.DrctnOfTheScndLeg").alias("reporter_direction_second_leg"),
+        F.col(f"{cp}.RptgCtrPty.DrctnOrSd.CtrPtySd").alias("reporter_side"),
+
+        # === Other counterparty (CtrPty.OthrCtrPty) ===
+        F.col(f"{cp}.OthrCtrPty.IdTp.Lgl.Id.LEI").alias("other_cp_lei"),
+        F.coalesce(
+            F.col(f"{cp}.OthrCtrPty.IdTp.Lgl.Ctry"),
+            F.col(f"{cp}.OthrCtrPty.IdTp.Ntrl.Ctry"),
+        ).alias("other_cp_country"),
+        F.col(f"{cp}.OthrCtrPty.IdTp.Ntrl.Id.Id.Id").alias("other_cp_natural_person_id"),
+        F.when(F.col(f"{cp}.OthrCtrPty.Ntr.FI").isNotNull(), F.lit("FI"))
+         .when(F.col(f"{cp}.OthrCtrPty.Ntr.NFI").isNotNull(), F.lit("NFI"))
+         .when(F.col(f"{cp}.OthrCtrPty.Ntr.CntrlCntrPty").isNotNull(), F.lit("CCP"))
+         .when(F.col(f"{cp}.OthrCtrPty.Ntr.Othr").isNotNull(), F.lit("OTHR"))
+         .alias("other_cp_nature"),
+        F.coalesce(
+            F.transform(F.col(f"{cp}.OthrCtrPty.Ntr.FI.Sctr"), lambda x: x["Cd"]),
+            F.transform(F.col(f"{cp}.OthrCtrPty.Ntr.NFI.Sctr"), lambda x: x["Id"]),
+        ).alias("other_cp_sectors"),
+        F.coalesce(
+            F.col(f"{cp}.OthrCtrPty.Ntr.FI.ClrThrshld"),
+            F.col(f"{cp}.OthrCtrPty.Ntr.NFI.ClrThrshld"),
+        ).alias("other_cp_clr_threshold"),
+        F.col(f"{cp}.OthrCtrPty.Ntr.CntrlCntrPty").isNotNull().alias("other_cp_is_central_counterparty"),
+        F.col(f"{cp}.OthrCtrPty.RptgOblgtn").alias("other_cp_has_reporting_obligation"),
+
+        # === Other counterparty roles ===
+        F.col(f"{cp}.Brkr.LEI").alias("broker_lei"),
+        F.col(f"{cp}.Brkr.Othr.Id.Id").alias("broker_other_id"),
+        F.col(f"{cp}.SubmitgAgt.LEI").alias("submitting_agent_lei"),
+        F.col(f"{cp}.SubmitgAgt.Othr.Id.Id").alias("submitting_agent_other_id"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.LEI").alias("clearing_member_lei"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Id.Id").alias("clearing_member_other_id"),
+        F.col(f"{cp}.NttyRspnsblForRpt.LEI").alias("entity_responsible_for_report_lei"),
+        F.col(f"{cp}.NttyRspnsblForRpt.Othr.Id.Id").alias("entity_responsible_for_report_other_id"),
+
+        # === Contract data (CmonTradData.CtrctData) ===
+        F.col(f"{cd}.CtrctTp").alias("contract_type"),
+        F.col(f"{cd}.AsstClss").alias("asset_class"),
+        F.col(f"{cd}.PdctClssfctn").alias("product_classification"),
+        F.col(f"{cd}.PdctId.ISIN").alias("product_isin"),
+        F.col(f"{cd}.PdctId.UnqPdctIdr.Id").alias("product_unq_pdct_idr"),
+        F.col(f"{cd}.PdctId.AltrntvInstrmId").alias("product_alternative_id"),
+        F.col(f"{cd}.UndrlygInstrm.ISIN").alias("underlying_isin"),
+        F.col(f"{cd}.UndrlygInstrm.AltrntvInstrmId").alias("underlying_alternative_id"),
+        F.col(f"{cd}.UndrlygInstrm.UnqPdctIdr.Id").alias("underlying_unq_pdct_idr"),
+        F.col(f"{cd}.UndrlygInstrm.Indx.ISIN").alias("underlying_index_isin"),
+        F.col(f"{cd}.UndrlygInstrm.Indx.Nm").alias("underlying_index_name"),
+        F.col(f"{cd}.UndrlygInstrm.Indx.Indx").alias("underlying_index_value"),
+        F.col(f"{cd}.UndrlygInstrm.Bskt.Strr").alias("underlying_basket_structure"),
+        F.col(f"{cd}.UndrlygInstrm.Bskt.Id").alias("underlying_basket_id"),
+        F.transform(
+            F.col(f"{cd}.UndrlygInstrm.Bskt.Cnsttnts"),
+            lambda c: F.struct(c["InstrmId"]["ISIN"].alias("isin"),
+                               c["InstrmId"]["AltrntvInstrmId"].alias("alternative_id")),
+        ).alias("basket_constituents"),
+        F.col(f"{cd}.UndrlygInstrm.IdNotAvlbl").alias("underlying_id_not_available"),
+        F.col(f"{cd}.SttlmCcy.Ccy").alias("settlement_ccy"),
+        F.col(f"{cd}.SttlmCcyScndLeg.Ccy").alias("settlement_ccy_second_leg"),
+        F.col(f"{cd}.DerivBasedOnCrptAsst").alias("deriv_based_on_crypto"),
+
+        # === Audit / lineage ===
         F.col("reporting_date"),
         F.col("file_path"),
         F.col("file_name"),
