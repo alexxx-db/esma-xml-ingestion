@@ -86,11 +86,30 @@ def submission_file():
             F.col("FileBatchSize").cast("int").alias("batch_size"),
             F.col("FileVersion").cast("int").alias("file_version"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.BizMsgIdr").alias("biz_msg_id"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.CharSet").alias("header_char_set"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.Id").alias("sender_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.SchmeNm.Cd").alias("sender_scheme_cd"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.SchmeNm.Prtry").alias("sender_scheme_proprietary"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.Id").alias("recipient_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.SchmeNm.Cd").alias("recipient_scheme_cd"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.SchmeNm.Prtry").alias("recipient_scheme_proprietary"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.MsgDefIdr").alias("message_def_id"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.BizSvc").alias("business_service"),
             F.col("hdr_pyld_metadata.Hdr.AppHdr.CreDt").alias("header_creation_ts"),
+            # Related BAH — present on resubmission/correction messages that
+            # reference an earlier submission. Whole Rltd sub-tree captured
+            # for full traceability.
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.CharSet").alias("related_char_set"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.Fr.OrgId.Id.OrgId.Othr.Id").alias("related_sender_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.Fr.OrgId.Id.OrgId.Othr.SchmeNm.Cd").alias("related_sender_scheme_cd"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.Fr.OrgId.Id.OrgId.Othr.SchmeNm.Prtry").alias("related_sender_scheme_proprietary"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.To.OrgId.Id.OrgId.Othr.Id").alias("related_recipient_lei"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.To.OrgId.Id.OrgId.Othr.SchmeNm.Cd").alias("related_recipient_scheme_cd"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.To.OrgId.Id.OrgId.Othr.SchmeNm.Prtry").alias("related_recipient_scheme_proprietary"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.BizMsgIdr").alias("related_biz_msg_id"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.MsgDefIdr").alias("related_message_def_id"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.BizSvc").alias("related_business_service"),
+            F.col("hdr_pyld_metadata.Hdr.AppHdr.Rltd.CreDt").alias("related_creation_ts"),
             F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.RptHdr.NbRcrds").cast("bigint").alias("number_of_records"),
             F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.TradData.DataSetActn").alias("data_set_action"),
             F.col("_ingested_at").alias("ingested_at"),
@@ -359,12 +378,28 @@ def trade():
         # === Other counterparty roles ===
         F.col(f"{cp}.Brkr.LEI").alias("broker_lei"),
         F.col(f"{cp}.Brkr.Othr.Id.Id").alias("broker_other_id"),
+        F.col(f"{cp}.Brkr.Othr.Id.SchmeNm").alias("broker_other_id_scheme"),
+        F.col(f"{cp}.Brkr.Othr.Id.Issr").alias("broker_other_id_issuer"),
+        F.col(f"{cp}.Brkr.Othr.Nm").alias("broker_name"),
+        F.col(f"{cp}.Brkr.Othr.Dmcl").alias("broker_domicile"),
         F.col(f"{cp}.SubmitgAgt.LEI").alias("submitting_agent_lei"),
         F.col(f"{cp}.SubmitgAgt.Othr.Id.Id").alias("submitting_agent_other_id"),
+        F.col(f"{cp}.SubmitgAgt.Othr.Id.SchmeNm").alias("submitting_agent_other_id_scheme"),
+        F.col(f"{cp}.SubmitgAgt.Othr.Id.Issr").alias("submitting_agent_other_id_issuer"),
+        F.col(f"{cp}.SubmitgAgt.Othr.Nm").alias("submitting_agent_name"),
+        F.col(f"{cp}.SubmitgAgt.Othr.Dmcl").alias("submitting_agent_domicile"),
         F.col(f"{cp}.ClrMmb.Lgl.Id.LEI").alias("clearing_member_lei"),
         F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Id.Id").alias("clearing_member_other_id"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Id.SchmeNm").alias("clearing_member_other_id_scheme"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Id.Issr").alias("clearing_member_other_id_issuer"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Nm").alias("clearing_member_name"),
+        F.col(f"{cp}.ClrMmb.Lgl.Id.Othr.Dmcl").alias("clearing_member_domicile"),
         F.col(f"{cp}.NttyRspnsblForRpt.LEI").alias("entity_responsible_for_report_lei"),
         F.col(f"{cp}.NttyRspnsblForRpt.Othr.Id.Id").alias("entity_responsible_for_report_other_id"),
+        F.col(f"{cp}.NttyRspnsblForRpt.Othr.Id.SchmeNm").alias("entity_responsible_for_report_other_id_scheme"),
+        F.col(f"{cp}.NttyRspnsblForRpt.Othr.Id.Issr").alias("entity_responsible_for_report_other_id_issuer"),
+        F.col(f"{cp}.NttyRspnsblForRpt.Othr.Nm").alias("entity_responsible_for_report_name"),
+        F.col(f"{cp}.NttyRspnsblForRpt.Othr.Dmcl").alias("entity_responsible_for_report_domicile"),
 
         # === Contract data (CmonTradData.CtrctData) ===
         F.col(f"{cd}.CtrctTp").alias("contract_type"),
@@ -424,6 +459,9 @@ def trade():
         F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Amt._VALUE").alias("notional_second_leg_amount"),
         F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Amt._Ccy").alias("notional_second_leg_ccy"),
         F.col(f"{txd}.NtnlAmt.ScndLeg.Amt.Sgn").alias("notional_second_leg_sign"),
+        # Leg-level Ccy attribute (distinct from amount-level _Ccy above);
+        # set on the leg element itself in the XSD for cross-currency swaps.
+        F.col(f"{txd}.NtnlAmt.ScndLeg.Ccy").alias("notional_second_leg_currency"),
 
         # === Notional quantities (TxData.NtnlQty) ===
         F.col(f"{txd}.NtnlQty.FrstLeg.TtlQty").alias("notional_first_leg_total_qty"),
@@ -441,6 +479,10 @@ def trade():
         F.col(f"{txd}.TradClr.ClrSts.Clrd").isNotNull().alias("is_cleared"),
         F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.LEI").alias("ccp_lei"),
         F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Id.Id").alias("ccp_other_id"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Id.SchmeNm").alias("ccp_other_id_scheme"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Id.Issr").alias("ccp_other_id_issuer"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Nm").alias("ccp_name"),
+        F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.CCP.Othr.Dmcl").alias("ccp_domicile"),
         F.col(f"{txd}.TradClr.ClrSts.Clrd.Dtls.ClrDtTm").alias("cleared_ts"),
         F.col(f"{txd}.TradClr.ClrSts.NonClrd.Rsn").alias("clearing_non_cleared_reason"),
         F.col(f"{txd}.TradClr.IntraGrp").alias("is_intragroup"),
@@ -466,6 +508,7 @@ def trade():
         F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.DayCnt.Cd").alias("ir_first_leg_floating_day_count"),
         F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.PmtFrqcy.Term.Unit").alias("ir_first_leg_floating_pmt_freq_unit"),
         F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.PmtFrqcy.Term.Val").alias("ir_first_leg_floating_pmt_freq_val"),
+        F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.PmtFrqcy.Prtry").alias("ir_first_leg_floating_pmt_freq_prop"),
         F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.RstFrqcy.Term.Unit").alias("ir_first_leg_floating_rst_freq_unit"),
         F.col(f"{txd}.IntrstRate.FrstLeg.Fltg.RstFrqcy.Term.Val").alias("ir_first_leg_floating_rst_freq_val"),
 
@@ -490,6 +533,7 @@ def trade():
         F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.DayCnt.Cd").alias("ir_second_leg_floating_day_count"),
         F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.PmtFrqcy.Term.Unit").alias("ir_second_leg_floating_pmt_freq_unit"),
         F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.PmtFrqcy.Term.Val").alias("ir_second_leg_floating_pmt_freq_val"),
+        F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.PmtFrqcy.Prtry").alias("ir_second_leg_floating_pmt_freq_prop"),
         F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.RstFrqcy.Term.Unit").alias("ir_second_leg_floating_rst_freq_unit"),
         F.col(f"{txd}.IntrstRate.ScndLeg.Fltg.RstFrqcy.Term.Val").alias("ir_second_leg_floating_rst_freq_val"),
 
@@ -528,6 +572,10 @@ def trade():
         F.col(f"{txd}.Optn.ExrcStyle").alias("option_exercise_style"),
         F.col(f"{txd}.Optn.StrkPric.MntryVal.Amt._VALUE").alias("option_strike_price"),
         F.col(f"{txd}.Optn.StrkPric.MntryVal.Amt._Ccy").alias("option_strike_price_ccy"),
+        F.col(f"{txd}.Optn.StrkPric.MntryVal.Sgn").alias("option_strike_price_sign"),
+        F.col(f"{txd}.Optn.StrkPric.Unit").alias("option_strike_price_unit"),
+        F.col(f"{txd}.Optn.StrkPric.Pctg").alias("option_strike_price_pct"),
+        F.col(f"{txd}.Optn.StrkPric.Yld").alias("option_strike_price_yield"),
         F.col(f"{txd}.Optn.PrmAmt._VALUE").alias("option_premium_amount"),
         F.col(f"{txd}.Optn.PrmAmt._Ccy").alias("option_premium_ccy"),
         F.col(f"{txd}.Optn.PrmPmtDt").alias("option_premium_payment_dt"),
@@ -536,6 +584,8 @@ def trade():
         # === Credit derivative attributes (TxData.Cdt) ===
         F.col(f"{txd}.Cdt.Snrty").alias("credit_seniority"),
         F.col(f"{txd}.Cdt.RefPty.LEI").alias("credit_reference_party_lei"),
+        F.col(f"{txd}.Cdt.RefPty.Ctry").alias("credit_reference_party_country"),
+        F.col(f"{txd}.Cdt.RefPty.CtrySubDvsn").alias("credit_reference_party_country_subdivision"),
         # Note: Cdt.PmtFrqcy is a STRING code in bronze (not a struct like
         # IntrstRate.PmtFrqcy), so we capture it directly as a single column.
         F.col(f"{txd}.Cdt.PmtFrqcy").alias("credit_payment_freq"),
@@ -555,6 +605,8 @@ def trade():
         # === Other payments (TxData.OthrPmt[]) — ARRAY<STRUCT> ===
         # Bronze row shape: {PmtTp.Tp, PmtAmt.Amt._VALUE, PmtAmt.Amt._Ccy,
         # PmtDt, PmtPyer, PmtRcvr}. The synthetic data follows the XSD.
+        # Payer/Receiver each have a Lgl (LEI) and Ntrl (natural-person ID)
+        # choice — both branches are projected so neither is dropped.
         F.transform(
             F.col(f"{txd}.OthrPmt"),
             lambda p: F.struct(
@@ -564,7 +616,9 @@ def trade():
                 p["PmtAmt"]["Sgn"].alias("sign"),
                 p["PmtDt"].alias("payment_dt"),
                 p["PmtPyer"]["Lgl"]["LEI"].alias("payer_lei"),
+                p["PmtPyer"]["Ntrl"]["Id"]["Id"].alias("payer_natural_person_id"),
                 p["PmtRcvr"]["Lgl"]["LEI"].alias("receiver_lei"),
+                p["PmtRcvr"]["Ntrl"]["Id"]["Id"].alias("receiver_natural_person_id"),
             ),
         ).alias("other_payments"),
 
