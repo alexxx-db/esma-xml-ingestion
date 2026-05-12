@@ -109,6 +109,25 @@ This migration costs one new table and a SQL pattern shift — design is forward
 
 ## 4. Table Definitions
 
+### 4.0 Decision principle for which XSD fields become which kind of column
+
+For every XSD leaf or sub-tree, the rule is:
+
+| Will an analyst filter, group, or aggregate on this? | Outcome |
+|---|---|
+| **Yes** | Flat scalar column with a business-readable name. Always, no exceptions. Choice fields collapsed to the common branch (LEI) + a `*_other_id` fallback. |
+| **No, but the data is still occasionally needed** | `ARRAY<…>` or `STRUCT<…>` column on `trade` — preserves fidelity without polluting the top level. Used when the field is multi-valued (settlement dates, other payments) OR a deep choice taxonomy where ≥95% of leaves would be NULL per row (commodity sub-product taxonomy, energy delivery attributes). |
+| **No, and the field is genuinely long-tail** | Drop from silver. Accessible via bronze's `emir_raw` for the rare analyst who needs it. |
+
+This rule applies field-by-field, not section-by-section. A given XSD struct may have some leaves promoted to flat columns and others kept nested — driven by analytical hotness, not XSD structure.
+
+The wide-flat design is the right call for THIS branch because:
+- It gives analysts business-readable column names at top level — the renaming + promotion alone is a substantive win over querying bronze's deep dot-notation paths.
+- Spark/Delta + Photon handle wide tables fine; column pruning means SELECT cost scales with referenced columns, not table width.
+- It minimises pipeline complexity (no surrogate-key generation, no dimension upsert logic).
+
+A **star-schema migration path** is reserved as a documented future option (see §8 follow-ups): once GLEIF reference data integration becomes a priority OR cross-regulation analytics (EMIR + MiFIR sharing counterparty/instrument dims) becomes material, splitting out `dim_legal_entity` + `dim_date` is the natural next step. The wide-flat columns and clear column-to-XSD-path mapping make that pivot straightforward — every `reporter_lei`-style column becomes a natural surrogate-key target.
+
 ### 4.1 `trade` — main fact table
 
 **Grain:** one row per `<Stat>` element per submission snapshot.
@@ -306,6 +325,76 @@ xchg_quoted_ccy                     STRING
 xchg_rate_basis_proprietary         STRING       -- Ccy.XchgRateBsis.Prtry
 ```
 
+**Option attributes (TxData.Optn) — for any optional / option-like derivative:**
+```
+option_type                         STRING       -- Tp (CALL/PUT/OTHR)
+option_exercise_style               STRING       -- ExrcStyle (AMER/EURO/BERM/ASIA)
+option_strike_price                 DECIMAL(25,19) -- StrkPric (scalar; schedule goes to trade_schedule)
+option_strike_price_ccy             STRING
+option_premium_amount               DECIMAL(25,19) -- PrmAmt
+option_premium_ccy                  STRING
+option_premium_payment_dt           DATE         -- PrmPmtDt
+option_underlying_maturity_dt       DATE         -- MtrtyDtOfUndrlyg
+```
+Note: `Optn.StrkPricSchdl[]` (strike-price schedule, multi-valued) becomes rows in `trade_schedule` with `schedule_type='STRIKE'` — see §4.2.
+
+**Credit derivative attributes (TxData.Cdt) — for CDS, CDSX, credit indices:**
+```
+credit_seniority                    STRING       -- Cdt.Snrty (SNDB/SBOD/MZZD/...)
+credit_reference_party_lei          STRING       -- Cdt.RefPty.LEI
+credit_payment_freq_unit            STRING       -- Cdt.PmtFrqcy.Term.Unit
+credit_payment_freq_val             DECIMAL(3,0) -- Cdt.PmtFrqcy.Term.Val
+credit_calculation_basis            STRING       -- Cdt.ClctnBsis
+credit_series                       STRING       -- Cdt.Srs
+credit_version                      STRING       -- Cdt.Vrsn
+credit_index_factor                 DECIMAL(11,10) -- Cdt.IndxFctr
+credit_tranche_attachment           DECIMAL(11,10) -- Cdt.Trch.AttchmntPt (if present)
+credit_tranche_detachment           DECIMAL(11,10) -- Cdt.Trch.DtchmntPt
+```
+
+**Package transaction attributes (TxData.Packg):**
+```
+package_complex_trade_id            STRING       -- Packg.CmplxTradId
+package_price                       DECIMAL(25,19) -- Packg.Pric
+package_spread                      DECIMAL(25,19) -- Packg.Sprd
+```
+
+**Other payments (TxData.OthrPmt[]):**
+```
+other_payments                      ARRAY<STRUCT<
+                                       payment_type STRING,   -- e.g., UFRO, PRYM
+                                       amount       DECIMAL(25,19),
+                                       ccy          STRING,
+                                       payment_dt   DATE
+                                     >>
+```
+Multi-valued, rarely individually queried; analysts who need per-payment detail explode this on demand.
+
+**Commodity product taxonomy (TxData.Cmmdty) — for commodity derivatives only:**
+Three COALESCE'd promoted columns at top level (analyst answer to "what kind of commodity?"):
+```
+commodity_base_product              STRING       -- COALESCE across Agrcltrl|Nrgy|Envttl|Frtlzr|Frght|Indx|IndstrlPdct|Infltn|Metl|MultiCmmdtyExtc|OffclEcnmcSttstcs|Othr|OthrC10|Ppr|Plprpln base
+commodity_sub_product               STRING       -- COALESCE across the SubPdct fields
+commodity_additional_sub_product    STRING       -- COALESCE across the AddtlSubPdct fields
+```
+The deep 15-branch taxonomy detail (specific to e.g., agricultural→dairy→grade-A vs agricultural→grain→wheat-type) is NOT carried in silver — accessible via bronze for the rare deep-commodity-analytics use case. This keeps the trade table from gaining ~50 mostly-NULL columns for the ~5–10% of trades that are commodity-class.
+
+**Energy-specific attributes (TxData.NrgySpcfcAttrbts) — for energy commodity sub-class:**
+```
+energy_interconnection_point        STRING       -- IntrCnnctnPt
+energy_load_type                    STRING       -- LdTp
+energy_delivery_zones               ARRAY<STRING> -- DlvryPtOrZone[]
+energy_delivery_attributes          STRUCT<
+                                       frequency STRING,
+                                       time_interval STRING,
+                                       time_zone STRING,
+                                       delivery_capacity STRING,
+                                       quantity_unit STRING,
+                                       price_per_unit DECIMAL(25,19),
+                                       price_ccy STRING
+                                     >    -- DlvryAttr — kept as struct (composite, rarely scalar-queried)
+```
+
 **Lifecycle / risk-reduction / confirmation:**
 ```
 contract_modification_action_type   STRING       -- CtrctMod.ActnTp (NEWT/MODI/CORR/TERM/REVI/CANC/EROR/POSC)
@@ -350,7 +439,10 @@ ingested_at                         TIMESTAMP
 silver_processed_at                 TIMESTAMP    -- current_timestamp() at silver write
 ```
 
-**Total `trade` columns: ~210 scalars + 4 array columns** (`reporter_sectors`, `other_cp_sectors`, `settlement_dates`, `basket_constituents`).
+**Total `trade` columns: ~232 scalars + 5 array columns + 1 struct column**:
+- Array columns: `reporter_sectors`, `other_cp_sectors`, `settlement_dates`, `basket_constituents`, `energy_delivery_zones`
+- Plus 1 ARRAY<STRUCT> column: `other_payments`
+- Plus 1 STRUCT column: `energy_delivery_attributes` (preserved as composite — rarely scalar-queried)
 
 ### 4.2 `trade_schedule`
 
@@ -380,6 +472,7 @@ The schedule discriminator is filled per source path:
 - `NtnlAmt.ScndLeg.SchdlPrd[]` → `NTNL_AMT_LEG_2`
 - `NtnlQty.FrstLeg.Dtls.SchdlPrd[]` → `NTNL_QTY_LEG_1`
 - `NtnlQty.ScndLeg.Dtls.SchdlPrd[]` → `NTNL_QTY_LEG_2`
+- `Optn.StrkPricSchdl[]` → `STRIKE`
 
 Source-specific fields populate the union: `PRICE` rows populate `amount`/`percentage`; `NTNL_AMT_*` populate `amount`/`amount_ccy`/`amount_sign`; `NTNL_QTY_*` populate `quantity`. Unused fields stay NULL.
 
@@ -472,7 +565,7 @@ F.coalesce(
 
 `trade` reads bronze, performs the wide `.select(...)` mapping, and parses `reporting_date` from `ESMADate` or filename regex. NOT `dropDuplicates` — bronze is already de-duplicated upstream and snapshots ARE supposed to repeat per day.
 
-`trade_schedule` reads bronze, performs five `posexplode(...)` operations (one per schedule type), unions the five sub-DataFrames, and selects unified columns. Implementation note: use `F.posexplode_outer` so trades with NULL schedule arrays don't drop from the join graph (zero-row output is fine, but we want no SparkSession warnings).
+`trade_schedule` reads bronze, performs six `posexplode(...)` operations (one per schedule type: PRICE, NTNL_AMT_LEG_1, NTNL_AMT_LEG_2, NTNL_QTY_LEG_1, NTNL_QTY_LEG_2, STRIKE), unions the six sub-DataFrames, and selects unified columns. Implementation note: use `F.posexplode_outer` so trades with NULL schedule arrays don't drop from the join graph (zero-row output is fine, but we want no SparkSession warnings).
 
 `trade_beneficiary` reads bronze, `posexplode(F.col("CtrPtySpcfcData.CtrPty.Bnfcry"))`, derives `beneficiary_type` from which branch is populated.
 
@@ -612,19 +705,25 @@ Document results in `docs/superpowers/plans/2026-05-12-emir-silver-smoke-test-re
 - **MiFIR silver** — separate brainstorm + spec; pattern from this design (domain entities + envelope) is reusable
 - **Gold layer** — once analysts have queried silver for a few weeks, identify the actual hot aggregations and design `daily_*` gold tables. Could include metric views.
 - **SCD Type 2 migration** — when the append-only volume becomes unmanageable OR when analysts ask for "trade lifecycle" queries
+- **Star-schema pivot — `dim_legal_entity` + `dim_date`** — When cross-regulation analytics (EMIR + MiFIR sharing counterparty dim) becomes a priority OR GLEIF reference data integration starts. Migration is mechanical: the current `*_lei` columns become surrogate-key targets; the entity dimension absorbs sector/nature/country attributes that currently appear as separate columns in `trade`. Wide-flat design was chosen for v1 because the renaming + promotion alone is a substantive analytics win and the pipeline complexity is lower.
+- **Bronze filename-regex parameterization** — `xml_loader.py` currently hard-codes `_FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"` and `_ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"`. These are ESMA-specific. Customer deployments with different naming conventions need bundle-config parameters. Out of scope for this silver spec (a bronze concern), queued as a separate small follow-up branch.
 - **Retire legacy `2_flatten_explode_table.py`** — once silver is production-proven, remove the notebook and its job task. Update `bundle.new-type_resources.yml.template` to scaffold without the flatten step.
 - **`reporter_primary_sector_cd`** (and other array-to-scalar derivations) — add if BI-tool friction proves real
+- **Deep commodity taxonomy in silver** — current spec keeps only the COALESCE'd base/sub/additional-sub product codes. If commodity-derivatives analytics becomes a focus, flatten the 15-branch product taxonomy or add a `commodity STRUCT<>` column with the full sub-tree preserved.
 - **Unit tests for the silver column-mapping** — currently we trust the SDP runtime; UDF or pure-SQL transforms should be unit-testable in isolation
-- **Reference data joins** — eventually join LEI to legal-entity name / country; out of scope for v1
+- **Reference data joins** — eventually join LEI to legal-entity name / country; out of scope for v1 (becomes a natural `dim_legal_entity` enrichment under the star-schema pivot)
 
 ## 9. Approval
 
 All sections (scope, architecture, table definitions, implementation, validation) reviewed and approved interactively before this document was written. Decisions captured:
 - 4-table cut: `trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`
-- Domain-driven, fully flat scalars in `trade`, business-readable names
-- ARRAY columns retained for: `reporter_sectors`, `other_cp_sectors`, `settlement_dates`, `basket_constituents`
+- Domain-driven, business-readable column names. Wide-flat scalars in `trade` (~232 cols), per-field decision rule (flatten what analysts query; STRUCT/ARRAY where data is needed but rarely queried; drop long-tail) — see §4.0
+- ARRAY/STRUCT columns retained for the long-tail composites: `reporter_sectors`, `other_cp_sectors`, `settlement_dates`, `basket_constituents`, `energy_delivery_zones`, `other_payments ARRAY<STRUCT>`, `energy_delivery_attributes STRUCT<>`
+- 6 product-class-specific TxData sections covered: `Optn`, `Cdt`, `Packg` fully flat; `OthrPmt` as ARRAY<STRUCT>; `Cmmdty` deep taxonomy collapsed to 3 COALESCE'd promoted columns (`commodity_base_product` etc.) with deep tree NOT in silver; `NrgySpcfcAttrbts` partially flat with one STRUCT for delivery attributes
 - Choice fields: LEI primary + `*_other_id` fallback; rare branches accessible via bronze
-- SCD: append-only, partition/cluster on `reporting_date`. SCD2 migration documented
+- SCD: append-only, partition/cluster on `reporting_date`. SCD2 migration documented (§3.3)
+- Star-schema migration path documented as a follow-up (§8). Wide-flat chosen for v1 because the renaming + promotion alone is a substantive win and pipeline complexity is lower
 - No `trade_latest` view — analysts handle filtering
 - No gold layer in this spec
 - Legacy `2_flatten_explode_table.py` kept as escape hatch; same-schema layout for silver
+- Bronze filename-regex parameterization queued as a separate follow-up branch (§8); out of scope for silver
