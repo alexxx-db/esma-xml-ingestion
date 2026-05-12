@@ -269,3 +269,49 @@ def trade_schedule():
         .unionByName(strike_df, allowMissingColumns=True)
     )
     return unioned.withColumn("silver_processed_at", F.current_timestamp())
+
+
+# --------------------------------------------------------------------------
+# Table 4 of 4: trade (main fact, ~232 scalar cols + 5 arrays + 1 struct)
+#
+# One row per <Stat> per submission snapshot. Wide-flat by design;
+# business-readable column names; choice fields collapsed to LEI common
+# branch + *_other_id fallback. See spec §4.0 for the decision rule.
+#
+# Built incrementally — each commit adds one logical XSD section's
+# columns to the .select(...) below.
+# --------------------------------------------------------------------------
+
+
+@dp.table(
+    name=TBL_TRADE,
+    comment=(
+        "Public: per-trade snapshot, wide-flat with business-readable "
+        "column names. Choice fields collapsed to LEI primary + "
+        "*_other_id fallback. Partition/cluster by reporting_date. "
+        "Append-only — each daily snapshot lands as new rows. See "
+        "spec docs/superpowers/specs/2026-05-12-emir-silver-design.md."
+    ),
+    cluster_by_auto=True,
+)
+def trade():
+    src = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    return src.select(
+        # === Identification ===
+        F.col("CmonTradData.TxData.TxId.UnqTxIdr").alias("trade_id"),
+        F.col("CmonTradData.TxData.TxId.Prtry.Id").alias("trade_id_proprietary"),
+        F.col("CmonTradData.TxData.PrrTxId.UnqTxIdr").alias("prior_trade_id"),
+        F.col("CmonTradData.TxData.PrrTxId.Prtry.Id").alias("prior_trade_id_proprietary"),
+        F.col("CmonTradData.TxData.PrrTxId.NotAvlbl").alias("prior_trade_id_not_available"),
+        F.col("CmonTradData.TxData.SbsqntTxId.UnqTxIdr").alias("subsequent_trade_id"),
+        F.col("CmonTradData.TxData.SbsqntTxId.Prtry.Id").alias("subsequent_trade_id_proprietary"),
+        F.col("CmonTradData.TxData.SbsqntTxId.NotAvlbl").alias("subsequent_trade_id_not_available"),
+        F.col("CmonTradData.TxData.RptTrckgNb").alias("report_tracking_number"),
+        F.col("CmonTradData.TxData.PltfmIdr").alias("platform_id"),
+        # === Audit / lineage (added early so the function returns a real DF) ===
+        F.col("reporting_date"),
+        F.col("file_path"),
+        F.col("file_name"),
+        F.col("_ingested_at").alias("ingested_at"),
+        F.current_timestamp().alias("silver_processed_at"),
+    )
