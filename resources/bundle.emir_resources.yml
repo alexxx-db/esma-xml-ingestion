@@ -96,3 +96,24 @@ resources:
         xml_schema_hdr_pyld_metadata_path: ${var.emir_xml_schema_hdr_pyld_metadata_path}
         xml_xsd_schema_pyld_path: ${var.emir_xml_xsd_schema_pyld_path}
         enable_xsd_validation: ${var.emir_enable_xsd_validation}
+
+    emir_silver_pipeline:
+      name: "EMIR Silver (domain-driven)"
+      catalog: ${var.emir_catalog}
+      schema: ${var.emir_raw_schema}
+      serverless: true
+      channel: PREVIEW
+      development: false
+      photon: true
+      continuous: false
+
+      libraries:
+        - file:
+            path: ../src/pipelines/silver_emir.py
+
+      configuration:
+        catalog: ${var.emir_catalog}
+        raw_schema: ${var.emir_raw_schema}
+        silver_schema: ${var.emir_raw_schema}
+        bronze_table: ${var.emir_table_prefix}_raw
+        regulation: "EMIR"
