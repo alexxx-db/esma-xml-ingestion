@@ -109,6 +109,20 @@ This migration costs one new table and a SQL pattern shift — design is forward
 
 ## 4. Table Definitions
 
+> **Erratum (post-implementation):** During smoke test on real bronze data,
+> five schema-path assumptions in §4.1 below turned out to differ from
+> the actual `emir_raw` struct shape. The implementation reflects the
+> corrections; this section reads literally per the original design.
+> See `docs/superpowers/plans/2026-05-12-emir-silver-smoke-test-results.md`
+> for the corrections — affected fields: `credit_payment_freq` (single
+> STRING, not `*_unit` + `*_val`), `credit_tranche_attachment` /
+> `_detachment` (under `Cdt.Trch.Trnchd`, plus new `credit_tranche_untranched`),
+> `other_payments` ARRAY<STRUCT> (richer shape — adds `sign`, `payer_lei`,
+> `receiver_lei`), STRIKE schedule rows (shared `Pric` shape with PRICE),
+> and `commodity_*` COALESCE blocks (two-level taxonomy for 9 of 15
+> categories). The contract (analyst-facing column names + business
+> meanings) is unchanged.
+
 ### 4.0 Decision principle for which XSD fields become which kind of column
 
 For every XSD leaf or sub-tree, the rule is:
