@@ -62,6 +62,81 @@ _FILE_INDEX_PATTERN = r"\d\d\d\d\d\d-\d"
 _ESMA_DATE_PATTERN = r"-\d\d\d\d\d\d_"
 
 
+def _add_filename_regex_columns(df):
+    """Add filename-derived columns to a DataFrame that has a ``file_name`` column.
+
+    Returns the DataFrame with four columns appended:
+    ``FileBatchIndex``, ``FileBatchSize``, ``FileVersion``, ``ESMADate``.
+
+    Default implementation parses the ESMA naming convention:
+    ``<6-digit batch index>-<1-digit batch size>_<6-digit YYMMDD>_*.xml``
+
+    Customer customization
+    ----------------------
+    Customers with a different filename convention should REPLACE THIS
+    FUNCTION (or fork the source and override) rather than editing the
+    @dp.table definitions. The four output column names must stay the
+    same so downstream silver / flatten consumers keep working; the
+    extraction logic inside is yours to redefine.
+
+    The toggle ``ENABLE_FILENAME_REGEX`` (config key
+    ``enable_filename_regex``) short-circuits this function to emit
+    NULL passthrough — useful when filenames don't match any
+    convention and the columns are wanted as a placeholder only.
+    """
+    if not ENABLE_FILENAME_REGEX:
+        return (
+            df
+            .withColumn("FileBatchIndex", F.lit(None).cast("string"))
+            .withColumn("FileBatchSize", F.lit(None).cast("string"))
+            .withColumn("FileVersion", F.lit(None).cast("string"))
+            .withColumn("ESMADate", F.lit(None).cast("string"))
+        )
+    return (
+        df
+        .withColumn(
+            "FileBatchIndex",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                1, 3,
+            ),
+        )
+        .withColumn(
+            "FileBatchSize",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                4, 3,
+            ),
+        )
+        .withColumn(
+            "FileVersion",
+            F.substring(
+                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
+                8, 1,
+            ),
+        )
+        .withColumn(
+            "ESMADate",
+            F.concat(
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    2, 2,
+                ),
+                F.lit("-"),
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    4, 2,
+                ),
+                F.lit("-"),
+                F.substring(
+                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
+                    6, 2,
+                ),
+            ),
+        )
+    )
+
+
 def _read_schema(file_path: str) -> StructType:
     """Load a Spark JSON schema file into a StructType.
 
@@ -344,46 +419,7 @@ def raw():
             F.from_xml(F.col("_hdr_xml"), XML_HDR_PYLD_METADATA_SCHEMA),
         )
         .drop("_hdr_xml")
-        .withColumn(
-            "FileBatchIndex",
-            F.substring(
-                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
-                1, 3,
-            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
-        )
-        .withColumn(
-            "FileBatchSize",
-            F.substring(
-                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
-                4, 3,
-            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
-        )
-        .withColumn(
-            "FileVersion",
-            F.substring(
-                F.regexp_extract(F.col("file_name"), _FILE_INDEX_PATTERN, 0),
-                8, 1,
-            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
-        )
-        .withColumn(
-            "ESMADate",
-            F.concat(
-                F.substring(
-                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
-                    2, 2,
-                ),
-                F.lit("-"),
-                F.substring(
-                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
-                    4, 2,
-                ),
-                F.lit("-"),
-                F.substring(
-                    F.regexp_extract(F.col("file_name"), _ESMA_DATE_PATTERN, 0),
-                    6, 2,
-                ),
-            ) if ENABLE_FILENAME_REGEX else F.lit(None).cast("string"),
-        )
+        .transform(_add_filename_regex_columns)
     )
 
     # Right-side alias avoids duplicate file_path / file_name /
