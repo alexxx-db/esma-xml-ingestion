@@ -580,14 +580,21 @@ def submission_file():
 def transaction_party():
     bronze = spark.readStream.table(TBL_BRONZE)
 
-    def _explode_party(side: str, party_role: str, array_path: str):
-        """Posexplode-outer one party array, project unified row schema."""
+    # NOTE: AcctOwnr and DcsnMakr have DIFFERENT shapes in the richer ESMA payload schema:
+    #   AcctOwnr[]: {Id: {LEI, MIC, Prsn: {FrstNm, Nm, BirthDt, Othr: {Id, SchmeNm}}, Intl}, CtryOfBrnch}
+    #     -- NO Othr directly under Id; NO Prsn.CtryOfBrnch.
+    #   DcsnMakr[]: {LEI, Prsn: {FrstNm, Nm, BirthDt, Othr: {Id, SchmeNm}}}
+    #     -- flat LEI (no Id wrapper); no MIC/Intl/CtryOfBrnch.
+    # We use two helpers and unionByName(allowMissingColumns=True) — but Spark still
+    # needs every referenced column to exist in its source, so we project explicitly.
+
+    def _explode_acct_ownr(side: str, array_path: str):
         return (
             bronze
             .select(
                 F.col("New.TxId").alias("transaction_id"),
                 F.lit(side).alias("side"),
-                F.lit(party_role).alias("party_role"),
+                F.lit("ACCT_OWNR").alias("party_role"),
                 F.col("_ingested_at").alias("ingested_at"),
                 F.posexplode_outer(F.col(array_path)).alias("sequence_no", "_party"),
             )
@@ -599,16 +606,18 @@ def transaction_party():
                 "party_role",
                 "sequence_no",
                 F.col("_party.Id.LEI").alias("party_lei"),
-                F.col("_party.Id.Othr.Id").alias("party_other_id"),
-                F.col("_party.Id.Othr.SchmeNm.Cd").alias("party_other_id_scheme"),
-                F.col("_party.Id.Othr.SchmeNm.Prtry").alias("party_other_id_scheme_proprietary"),
+                # Id.Othr.* doesn't exist on AcctOwnr.Id (Id is choice of LEI/MIC/Prsn/Intl)
+                F.lit(None).cast("string").alias("party_other_id"),
+                F.lit(None).cast("string").alias("party_other_id_scheme"),
+                F.lit(None).cast("string").alias("party_other_id_scheme_proprietary"),
                 F.col("_party.Id.MIC").alias("party_mic"),
                 F.col("_party.Id.Intl").alias("party_intl_person_id"),
                 F.col("_party.CtryOfBrnch").alias("party_country_of_branch"),
                 F.col("_party.Id.Prsn.FrstNm").alias("person_first_name"),
                 F.col("_party.Id.Prsn.Nm").alias("person_last_name"),
                 F.col("_party.Id.Prsn.BirthDt").alias("person_birth_dt"),
-                F.col("_party.Id.Prsn.CtryOfBrnch").alias("person_country"),
+                # Prsn.CtryOfBrnch doesn't exist in the richer Prsn struct
+                F.lit(None).cast("string").alias("person_country"),
                 F.col("_party.Id.Prsn.Othr.Id").alias("person_other_id"),
                 F.col("_party.Id.Prsn.Othr.SchmeNm.Cd").alias("person_other_scheme"),
                 F.col("_party.Id.Prsn.Othr.SchmeNm.Prtry").alias("person_other_scheme_proprietary"),
@@ -617,11 +626,49 @@ def transaction_party():
             )
         )
 
+    def _explode_dcsn_makr(side: str, array_path: str):
+        return (
+            bronze
+            .select(
+                F.col("New.TxId").alias("transaction_id"),
+                F.lit(side).alias("side"),
+                F.lit("DCSN_MAKR").alias("party_role"),
+                F.col("_ingested_at").alias("ingested_at"),
+                F.posexplode_outer(F.col(array_path)).alias("sequence_no", "_party"),
+            )
+            .filter(F.col("transaction_id").isNotNull())
+            .filter(F.col("_party").isNotNull())
+            .select(
+                "transaction_id",
+                "side",
+                "party_role",
+                "sequence_no",
+                # DcsnMakr has flat LEI (no .Id wrapper)
+                F.col("_party.LEI").alias("party_lei"),
+                F.lit(None).cast("string").alias("party_other_id"),
+                F.lit(None).cast("string").alias("party_other_id_scheme"),
+                F.lit(None).cast("string").alias("party_other_id_scheme_proprietary"),
+                # DcsnMakr has no MIC / Intl / CtryOfBrnch
+                F.lit(None).cast("string").alias("party_mic"),
+                F.lit(None).cast("string").alias("party_intl_person_id"),
+                F.lit(None).cast("string").alias("party_country_of_branch"),
+                F.col("_party.Prsn.FrstNm").alias("person_first_name"),
+                F.col("_party.Prsn.Nm").alias("person_last_name"),
+                F.col("_party.Prsn.BirthDt").alias("person_birth_dt"),
+                F.lit(None).cast("string").alias("person_country"),
+                F.col("_party.Prsn.Othr.Id").alias("person_other_id"),
+                F.col("_party.Prsn.Othr.SchmeNm.Cd").alias("person_other_scheme"),
+                F.col("_party.Prsn.Othr.SchmeNm.Prtry").alias("person_other_scheme_proprietary"),
+                F.col("ingested_at"),
+                F.current_timestamp().alias("silver_processed_at"),
+            )
+        )
+
     return (
-        _explode_party("BUYER",  "ACCT_OWNR", "New.Buyr.AcctOwnr")
-        .unionByName(_explode_party("BUYER",  "DCSN_MAKR", "New.Buyr.DcsnMakr"), allowMissingColumns=True)
-        .unionByName(_explode_party("SELLER", "ACCT_OWNR", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
-        .unionByName(_explode_party("SELLER", "DCSN_MAKR", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
+        _explode_acct_ownr("BUYER", "New.Buyr.AcctOwnr")
+        .unionByName(_explode_dcsn_makr("BUYER", "New.Buyr.DcsnMakr"), allowMissingColumns=True)
+        .unionByName(_explode_acct_ownr("SELLER", "New.Sellr.AcctOwnr"), allowMissingColumns=True)
+        .unionByName(_explode_dcsn_makr("SELLER", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
     )
 
 
@@ -668,10 +715,12 @@ def transaction():
         F.col("New.InvstmtPtyInd").alias("investment_party_indicator"),
 
         # === Buyer flat fields — first AcctOwnr only (9 cols) ===
+        # NOTE: Id.Othr.* path does not exist in the richer ESMA payload schema
+        # (Id is a choice of {LEI, MIC, Prsn, Intl} — no Othr sibling). NULL-stubbed.
         F.col(f"{new_buy}").getItem(0).getField("Id").getField("LEI").alias("buyer_lei"),
-        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("Id").alias("buyer_other_id"),
-        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Cd").alias("buyer_other_id_scheme"),
-        F.col(f"{new_buy}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Prtry").alias("buyer_other_id_scheme_proprietary"),
+        F.lit(None).cast("string").alias("buyer_other_id"),
+        F.lit(None).cast("string").alias("buyer_other_id_scheme"),
+        F.lit(None).cast("string").alias("buyer_other_id_scheme_proprietary"),
         F.col(f"{new_buy}").getItem(0).getField("Id").getField("MIC").alias("buyer_mic"),
         F.col(f"{new_buy}").getItem(0).getField("Id").getField("Intl").alias("buyer_intl_person_id"),
         F.col(f"{new_buy}").getItem(0).getField("CtryOfBrnch").alias("buyer_country_of_branch"),
@@ -680,9 +729,9 @@ def transaction():
 
         # === Seller flat fields — mirror of buyer (9 cols) ===
         F.col(f"{new_sell}").getItem(0).getField("Id").getField("LEI").alias("seller_lei"),
-        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("Id").alias("seller_other_id"),
-        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Cd").alias("seller_other_id_scheme"),
-        F.col(f"{new_sell}").getItem(0).getField("Id").getField("Othr").getField("SchmeNm").getField("Prtry").alias("seller_other_id_scheme_proprietary"),
+        F.lit(None).cast("string").alias("seller_other_id"),
+        F.lit(None).cast("string").alias("seller_other_id_scheme"),
+        F.lit(None).cast("string").alias("seller_other_id_scheme_proprietary"),
         F.col(f"{new_sell}").getItem(0).getField("Id").getField("MIC").alias("seller_mic"),
         F.col(f"{new_sell}").getItem(0).getField("Id").getField("Intl").alias("seller_intl_person_id"),
         F.col(f"{new_sell}").getItem(0).getField("CtryOfBrnch").alias("seller_country_of_branch"),
@@ -728,17 +777,22 @@ def transaction():
         F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.FullNm").alias("instrument_full_name"),
         F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.ClssfctnTp").alias("instrument_classification"),
         F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.NtnlCcy").alias("instrument_notional_currency"),
-        F.col("New.FinInstrm.Othr.FinInstrmGnlAttrbts.CmmdtyDerivInd").alias("instrument_commodity_derivative"),
+        # NOTE: CmmdtyDerivInd not present on FinInstrmGnlAttrbts in richer schema. NULL-stubbed.
+        F.lit(None).cast("string").alias("instrument_commodity_derivative"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.AsstClssSpcfcAttrbts.Intrst.OthrNtnlCcy").alias("interest_other_notional_currency"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.AsstClssSpcfcAttrbts.FX.OthrNtnlCcy").alias("fx_other_notional_currency"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.PricMltplr").alias("instrument_price_multiplier"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.DlvryTp").alias("instrument_delivery_type"),
-        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.MtrtyDt").alias("instrument_maturity_dt"),
+        # NOTE: DerivInstrmAttrbts has only XpryDt in richer schema (no MtrtyDt). NULL-stubbed.
+        F.lit(None).cast("date").alias("instrument_maturity_dt"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.XpryDt").alias("instrument_expiry_dt"),
-        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.MntryVal._VALUE").alias("instrument_strike_price"),
-        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.MntryVal._Ccy").alias("instrument_strike_price_ccy"),
-        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pctg").alias("instrument_strike_price_percent"),
-        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Yld").alias("instrument_strike_price_yield"),
+        # NOTE: StrkPric is wrapped one level deeper as StrkPric.Pric.{MntryVal/Pctg/Yld}
+        # in the richer schema (mirrors Tx.Pric.Pric.* pattern), and monetary value
+        # lives under .MntryVal.Amt._VALUE/_Ccy, not directly under .MntryVal.
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pric.MntryVal.Amt._VALUE").alias("instrument_strike_price"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pric.MntryVal.Amt._Ccy").alias("instrument_strike_price_ccy"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pric.Pctg").alias("instrument_strike_price_percent"),
+        F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.StrkPric.Pric.Yld").alias("instrument_strike_price_yield"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.OptnTp").alias("instrument_option_type"),
         F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.OptnExrcStyle").alias("instrument_option_exercise_style"),
         F.when(F.col("New.FinInstrm.Othr.DerivInstrmAttrbts.UndrlygInstrm.Swp").isNotNull(), F.lit("SWAP"))
@@ -791,10 +845,12 @@ def transaction():
         F.transform(F.col(f"{u_oth}.Bskt.Indx"), lambda x: x["Nm"]["Term"]["Val"]).alias("underlying_other_basket_index_term_values"),
 
         # === Investment decision person (~9 cols) ===
-        F.col("New.InvstmtDcsnPrsn.LEI").alias("investment_decision_person_lei"),
-        F.col("New.InvstmtDcsnPrsn.Prsn.FrstNm").alias("investment_decision_person_first_name"),
-        F.col("New.InvstmtDcsnPrsn.Prsn.Nm").alias("investment_decision_person_last_name"),
-        F.col("New.InvstmtDcsnPrsn.Prsn.BirthDt").alias("investment_decision_person_birth_dt"),
+        # NOTE: InvstmtDcsnPrsn in the richer schema has only {Prsn.{CtryOfBrnch, Othr}, Algo}
+        # — no LEI, no Prsn.FrstNm/Nm/BirthDt. NULL-stubbed.
+        F.lit(None).cast("string").alias("investment_decision_person_lei"),
+        F.lit(None).cast("string").alias("investment_decision_person_first_name"),
+        F.lit(None).cast("string").alias("investment_decision_person_last_name"),
+        F.lit(None).cast("date").alias("investment_decision_person_birth_dt"),
         F.col("New.InvstmtDcsnPrsn.Prsn.CtryOfBrnch").alias("investment_decision_person_country"),
         F.col("New.InvstmtDcsnPrsn.Prsn.Othr.Id").alias("investment_decision_person_other_id"),
         F.col("New.InvstmtDcsnPrsn.Prsn.Othr.SchmeNm.Cd").alias("investment_decision_person_other_scheme"),
@@ -802,10 +858,12 @@ def transaction():
         F.col("New.InvstmtDcsnPrsn.Algo").alias("investment_decision_algo_id"),
 
         # === Executing person (~10 cols) ===
-        F.col("New.ExctgPrsn.LEI").alias("executing_person_lei"),
-        F.col("New.ExctgPrsn.Prsn.FrstNm").alias("executing_person_first_name"),
-        F.col("New.ExctgPrsn.Prsn.Nm").alias("executing_person_last_name"),
-        F.col("New.ExctgPrsn.Prsn.BirthDt").alias("executing_person_birth_dt"),
+        # NOTE: ExctgPrsn in the richer schema has only {Prsn.{CtryOfBrnch, Othr}, Algo, Clnt}
+        # — no LEI, no Prsn.FrstNm/Nm/BirthDt. NULL-stubbed.
+        F.lit(None).cast("string").alias("executing_person_lei"),
+        F.lit(None).cast("string").alias("executing_person_first_name"),
+        F.lit(None).cast("string").alias("executing_person_last_name"),
+        F.lit(None).cast("date").alias("executing_person_birth_dt"),
         F.col("New.ExctgPrsn.Prsn.CtryOfBrnch").alias("executing_person_country"),
         F.col("New.ExctgPrsn.Prsn.Othr.Id").alias("executing_person_other_id"),
         F.col("New.ExctgPrsn.Prsn.Othr.SchmeNm.Cd").alias("executing_person_other_scheme"),
@@ -817,7 +875,8 @@ def transaction():
         F.col("New.AddtlAttrbts.ShrtSellgInd").alias("short_selling_indicator"),
         F.transform(F.col("New.AddtlAttrbts.WvrInd"), lambda x: x["_VALUE"]).alias("waiver_indicators"),
         F.transform(F.col("New.AddtlAttrbts.OTCPstTradInd"), lambda x: x["_VALUE"]).alias("otc_post_trade_indicators"),
-        F.col("New.AddtlAttrbts.CmmdtyDerivInd").alias("commodity_derivative_indicator"),
+        # NOTE: AddtlAttrbts has no CmmdtyDerivInd in richer schema. NULL-stubbed.
+        F.lit(None).cast("string").alias("commodity_derivative_indicator"),
         F.col("New.AddtlAttrbts.RskRdcgTx").alias("risk_reducing_transaction"),
         F.col("New.AddtlAttrbts.SctiesFincgTxInd").alias("securities_financing_tx_indicator"),
 
