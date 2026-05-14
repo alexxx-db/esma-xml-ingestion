@@ -182,5 +182,63 @@ def submission_file():
             F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Prty").alias("priority"),
             F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Sgntr").cast("string").alias("signature_xml"),
             F.lit(None).cast("bigint").alias("number_of_records"),  # filled by a downstream agg in v2; for now placeholder
+
+            # === Sender (Fr.OrgId) — full party-identification block (~31 cols) ===
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.OrgId.AnyBIC").alias("sender_bic"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Nm").alias("sender_org_name"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.AdrTp").alias("sender_org_address_type"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.Dept").alias("sender_org_department"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.SubDept").alias("sender_org_sub_department"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.StrtNm").alias("sender_org_street_name"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.BldgNb").alias("sender_org_building_number"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.PstCd").alias("sender_org_post_code"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.TwnNm").alias("sender_org_town_name"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.CtrySubDvsn").alias("sender_org_country_sub_division"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.Ctry").alias("sender_org_country"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.PstlAdr.AdrLine").alias("sender_org_address_lines"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.OrgId.Othr"),
+                lambda o: o["Id"],
+            ).alias("sender_org_other_ids"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.OrgId.Othr"),
+                lambda o: o["SchmeNm"]["Cd"],
+            ).alias("sender_org_other_scheme_codes"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.OrgId.Othr"),
+                lambda o: o["SchmeNm"]["Prtry"],
+            ).alias("sender_org_other_scheme_proprietaries"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.OrgId.Othr"),
+                lambda o: o["Issr"],
+            ).alias("sender_org_other_issuers"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.DtAndPlcOfBirth.BirthDt").alias("sender_person_birth_dt"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.DtAndPlcOfBirth.PrvcOfBirth").alias("sender_person_province_of_birth"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.DtAndPlcOfBirth.CityOfBirth").alias("sender_person_city_of_birth"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.DtAndPlcOfBirth.CtryOfBirth").alias("sender_person_country_of_birth"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.Othr"),
+                lambda o: o["Id"],
+            ).alias("sender_person_other_ids"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.Othr"),
+                lambda o: o["SchmeNm"]["Cd"],
+            ).alias("sender_person_other_scheme_codes"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.Othr"),
+                lambda o: o["SchmeNm"]["Prtry"],
+            ).alias("sender_person_other_scheme_proprietaries"),
+            F.transform(
+                F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.Id.PrvtId.Othr"),
+                lambda o: o["Issr"],
+            ).alias("sender_person_other_issuers"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtryOfRes").alias("sender_country_of_residence"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.NmPrfx").alias("sender_contact_name_prefix"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.Nm").alias("sender_contact_name"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.PhneNb").alias("sender_contact_phone"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.MobNb").alias("sender_contact_mobile"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.FaxNb").alias("sender_contact_fax"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.EmailAdr").alias("sender_contact_email"),
+            F.col("hdr_pyld_metadata.BizAppHeader.AppHdr.Fr.OrgId.CtctDtls.Othr").alias("sender_contact_other"),
         )
     )
