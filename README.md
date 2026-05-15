@@ -58,7 +58,8 @@ esma_xml_ingestion/
 │   │   ├── 1_xml_file_loader_body.py       # (legacy reference — replaced by SDP)
 │   │   └── 2_flatten_explode_table.py      # Flatten + explode → bronze
 │   ├── pipelines/                          # Spark Declarative Pipelines
-│   │   └── xml_loader.py                   # Parameterized SDP for EMIR + MiFIR
+│   │   ├── xml_loader.py                   # Bronze: parameterized SDP for EMIR + MiFIR XML ingest
+│   │   └── silver_emir.py                  # Silver: domain-driven EMIR REFIT (trade + schedule + beneficiary + submission_file)
 │   └── util/
 │       └── xsd_processor.py                # XSD parsing helpers (Python)
 ├── fixtures/                               # Sample data and test files
@@ -70,7 +71,7 @@ esma_xml_ingestion/
 
 - **`databricks.yml`**: Main bundle configuration that defines deployment targets and includes resource files
 - **`resources/`**: Per-regulation jobs and SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
-- **`src/pipelines/`**: Parameterized Spark Declarative Pipeline (SDP) source for XML ingestion → `{prefix}_raw` + `{prefix}_quarantine`
+- **`src/pipelines/`**: Spark Declarative Pipelines — `xml_loader.py` (bronze: XML ingest → `{prefix}_raw` + `{prefix}_quarantine`) and `silver_emir.py` (silver: domain-driven `trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`)
 - **`src/notebooks/`**: Classic notebooks for XSD-to-schema preparation and the flatten/explode bronze step
 - **`src/util/`**: Python helpers for XSD processing
 
