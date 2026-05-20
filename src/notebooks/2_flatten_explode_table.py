@@ -1,7 +1,24 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Flatten and Explode Table Processing
-# MAGIC 
+# MAGIC # Flatten and Explode Table Processing (LEGACY)
+# MAGIC
+# MAGIC > **⚠️ Legacy reference.** This notebook is the original generic
+# MAGIC > flatten/explode step from the pre-SDP architecture. The current
+# MAGIC > approach replaces it with **domain-driven silver pipelines per
+# MAGIC > regime** (`src/pipelines/silver_emir.py`,
+# MAGIC > `src/pipelines/silver_mifir.py`) which project the regulator-
+# MAGIC > defined fields directly into named, queryable tables (`trade`,
+# MAGIC > `transaction`, `submission_file`, etc.) rather than producing a
+# MAGIC > generic recursive flatten.
+# MAGIC >
+# MAGIC > **Plan to convert this notebook to an SDP**: see
+# MAGIC > `docs/superpowers/plans/2026-05-19-flatten-sdp-conversion.md`.
+# MAGIC >
+# MAGIC > Use this notebook only for backwards-compatible runs against the
+# MAGIC > legacy `{prefix}_raw` table produced by the original
+# MAGIC > `1_xml_file_loader_body.py`. New deployments should go directly
+# MAGIC > from the SDP bronze (`xml_loader.py`) to the per-regime silver.
+# MAGIC
 # MAGIC This notebook transforms nested XML structures from the raw table into flattened, normalized bronze tables. Nested XML structures with multiple levels of arrays and structs are difficult to query efficiently in their original form. Flattening creates a relational model that enables faster analytics, simpler joins, and better performance for BI tools.
 # MAGIC 
 # MAGIC The notebook uses a recursive function to traverse the DataFrame schema, extracting simple fields, flattening nested structs into columns, and exploding arrays into separate tables. Each level of nesting becomes its own table, with surrogate keys linking child tables to their parents. This preserves referential integrity while improving query performance and making the data more accessible to standard SQL and BI tools.

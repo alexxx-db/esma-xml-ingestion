@@ -5,6 +5,28 @@
 
 ---
 
+> ## ⚠️ Legacy Notice
+>
+> **This guide describes the original notebook-based approach** (`src/notebooks/`
+> — `0_1_xml_schema_xsd.py`, `1_xml_file_loader_body.py`,
+> `2_flatten_explode_table.py`). The full pre-SDP repo is preserved on the
+> [`legacy/notebook-approach`](https://github.com/databricks-industry-solutions/esma_xml_ingestion/tree/legacy/notebook-approach)
+> branch.
+>
+> The current architecture on `main` uses **Spark Declarative Pipelines (SDP)**:
+> a parameterised bronze loader (`src/pipelines/xml_loader.py`) plus per-regime
+> domain silver layers (`src/pipelines/silver_emir.py`,
+> `silver_mifir.py`). See [README.md](README.md) for the current end-to-end
+> architecture, the two-part processing rationale, and deployment guidance.
+>
+> Sections of this guide below remain accurate for the **Schema Prep step**
+> (`0_1_xml_schema_xsd.py`) — that notebook is still used as the one-time
+> XSD → JSON conversion step before the SDP loader runs. Other sections
+> describing the streaming ingestion + flatten/explode notebooks are superseded
+> by the SDP pipelines.
+
+---
+
 ## Important Notice
 
 This solution is provided as a **Databricks Solution Accelerator** - a reference implementation designed to help customers quickly build production-ready data pipelines for ESMA-compliant XML ingestion.

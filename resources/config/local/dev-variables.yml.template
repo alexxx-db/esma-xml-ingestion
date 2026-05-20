@@ -10,15 +10,15 @@
 # To actually override the `dev` target, the overrides must live INSIDE
 # `targets.dev.variables`, not under top-level `variables:`.
 #
-# Example below targets the E2 demo field-eng workspace's
-# central_bank_ireland volume for SDP XML loader smoke testing.
+# Replace the placeholders below (<your_catalog>, <your_username>,
+# <your_volume>) with values for your own workspace and volume.
 
 targets:
   dev:
     variables:
-      catalog: "users"
-      emir_raw_schema: "matthew_moorcroft"
-      emir_landing_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/landing/"
-      emir_xml_schema_pyld_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/pyld_schema.json"
-      emir_xml_schema_hdr_pyld_metadata_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/hdr_pyld_metadata_schema.json"
-      emir_xml_xsd_schema_pyld_path: "/Volumes/users/matthew_moorcroft/central_bank_ireland/schemas/row_tag_schema.xsd"
+      catalog: "<your_catalog>"
+      emir_raw_schema: "<your_username>"
+      emir_landing_path: "/Volumes/<your_catalog>/<your_username>/<your_volume>/landing/"
+      emir_xml_schema_pyld_path: "/Volumes/<your_catalog>/<your_username>/<your_volume>/schemas/pyld_schema.json"
+      emir_xml_schema_hdr_pyld_metadata_path: "/Volumes/<your_catalog>/<your_username>/<your_volume>/schemas/hdr_pyld_metadata_schema.json"
+      emir_xml_xsd_schema_pyld_path: "/Volumes/<your_catalog>/<your_username>/<your_volume>/schemas/row_tag_schema.xsd"

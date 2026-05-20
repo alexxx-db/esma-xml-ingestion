@@ -47,3 +47,6 @@ scratch/
 # Local bundle config overrides (per-developer)
 resources/config/local/*
 !resources/config/local/*.template
+
+# Architecture diagram working files (rendered locally; not committed)
+docs/architecture/

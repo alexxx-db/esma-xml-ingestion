@@ -127,7 +127,10 @@ xml_hdr_pyld_metadata_schema = readSchema(xml_schema_hdr_pyld_metadata_path)
 
 # COMMAND ----------
 
-#TODO: Add cloudFiles.cleanSource and cloudFiles.moveDestination
+# LEGACY NOTE — Auto Loader cleanSource (MOVE/DELETE) is supported in the
+# SDP version of this loader at src/pipelines/xml_loader.py via the
+# clean_source_* DAB variables. This notebook is preserved as a legacy
+# reference only; new deployments should use the SDP pipeline.
 
 raw_pyld_df = (
     spark.readStream.format("cloudFiles")

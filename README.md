@@ -71,8 +71,13 @@ esma_xml_ingestion/
 
 - **`databricks.yml`**: Main bundle configuration that defines deployment targets and includes resource files
 - **`resources/`**: Per-regulation jobs and SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
-- **`src/pipelines/`**: Spark Declarative Pipelines — `xml_loader.py` (bronze: XML ingest → `{prefix}_raw` + `{prefix}_quarantine`) and `silver_emir.py` (silver: domain-driven `trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`)
-- **`src/notebooks/`**: Classic notebooks for XSD-to-schema preparation and the flatten/explode bronze step
+- **`src/pipelines/`**: Spark Declarative Pipelines —
+  - `xml_loader.py` — parameterised bronze for any ESMA regime (XML ingest → `{prefix}_raw` + `{prefix}_quarantine`)
+  - `silver_emir.py` — domain silver for EMIR REFIT (`trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`)
+  - `silver_mifir.py` — domain silver for MiFIR (`transaction`, `transaction_party`, `submission_file`)
+- **`src/notebooks/`**:
+  - `0_1_xml_schema_xsd.py` — **active**: one-time XSD → JSON schema + row-tag XSD conversion (Schema Prep step consumed by the SDP loader)
+  - `1_xml_file_loader_body.py`, `2_flatten_explode_table.py` — **legacy**: original notebook-based ingest + generic flatten, superseded by `src/pipelines/xml_loader.py` and the per-regime silver pipelines. Preserved as a reference; see `docs/superpowers/plans/2026-05-19-flatten-sdp-conversion.md` for the planned conversion of the flatten step to SDP. Full pre-SDP repo on the `legacy/notebook-approach` branch.
 - **`src/util/`**: Python helpers for XSD processing
 
 ## How the accelerator handles ESMA XML
