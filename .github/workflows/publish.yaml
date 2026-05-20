@@ -38,17 +38,10 @@ jobs:
       - name: Convert notebooks and create single-page app
         run: |
           mkdir -p site
-          
-          # Convert .ipynb notebooks to HTML fragments (body content only)
-          for notebook in notebooks/*.ipynb; do
-              if [ -f "$notebook" ]; then
-                  jupyter nbconvert "$notebook" --to html \
-                    --template classic --HTMLExporter.theme=light \
-                    --no-prompt --stdout > "temp_$(basename "$notebook" .ipynb).html"
-              fi
-          done
-          
-          # Convert .py Databricks notebooks to HTML fragments
+
+          # Convert Databricks .py notebooks (src/notebooks/) to HTML
+          # fragments. The repo has no .ipynb files; the convert script
+          # handles the Databricks-source-format used here.
           chmod +x .github/scripts/convert_notebooks.py
           python3 .github/scripts/convert_notebooks.py
           

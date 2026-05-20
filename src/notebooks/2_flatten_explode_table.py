@@ -11,9 +11,6 @@
 # MAGIC > `transaction`, `submission_file`, etc.) rather than producing a
 # MAGIC > generic recursive flatten.
 # MAGIC >
-# MAGIC > **Plan to convert this notebook to an SDP**: see
-# MAGIC > `docs/superpowers/plans/2026-05-19-flatten-sdp-conversion.md`.
-# MAGIC >
 # MAGIC > Use this notebook only for backwards-compatible runs against the
 # MAGIC > legacy `{prefix}_raw` table produced by the original
 # MAGIC > `1_xml_file_loader_body.py`. New deployments should go directly

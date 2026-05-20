@@ -20,8 +20,6 @@ Domain-driven silver layer on top of bronze ``mifir_raw``
 All inputs are supplied via ``spark.conf`` — see the MiFIR silver
 pipeline ``configuration`` block in
 ``resources/bundle.mifir_resources.yml``.
-
-Reference: docs/superpowers/specs/2026-05-12-mifir-silver-design.md
 """
 
 from __future__ import annotations
@@ -694,8 +692,7 @@ def transaction_party():
         "Public: per-MiFIR-transaction snapshot. Wide-flat with business-"
         "readable column names. action_type ∈ {'NEW', 'CXL'} discriminator. "
         "Choice fields collapsed to LEI + *_other_id fallback. Append-only "
-        "(event-based — not snapshot like EMIR). See spec docs/superpowers/"
-        "specs/2026-05-12-mifir-silver-design.md."
+        "(event-based — not snapshot like EMIR)."
     ),
     cluster_by_auto=True,
 )

@@ -50,3 +50,7 @@ resources/config/local/*
 
 # Architecture diagram working files (rendered locally; not committed)
 docs/architecture/
+
+# Internal design specs / implementation plans / smoke-test reports
+# (kept in this repo only as local working notes; not for publication)
+docs/superpowers/

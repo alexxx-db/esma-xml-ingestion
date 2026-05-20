@@ -13,8 +13,6 @@ Domain-driven silver layer on top of bronze ``emir_raw``. Four tables:
 
 All inputs are supplied via ``spark.conf`` — see the EMIR silver pipeline
 ``configuration`` block in ``resources/bundle.emir_resources.yml``.
-
-Reference: docs/superpowers/specs/2026-05-12-emir-silver-design.md
 """
 
 from __future__ import annotations
@@ -306,8 +304,7 @@ def trade_schedule():
         "Public: per-trade snapshot, wide-flat with business-readable "
         "column names. Choice fields collapsed to LEI primary + "
         "*_other_id fallback. Partition/cluster by reporting_date. "
-        "Append-only — each daily snapshot lands as new rows. See "
-        "spec docs/superpowers/specs/2026-05-12-emir-silver-design.md."
+        "Append-only — each daily snapshot lands as new rows."
     ),
     cluster_by_auto=True,
 )

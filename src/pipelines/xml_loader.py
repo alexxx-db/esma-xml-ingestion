@@ -7,8 +7,6 @@ enriched with an lxml XSD-validation error, and produces a public
 
 All inputs are supplied via ``spark.conf`` — see the bundle pipeline
 ``configuration`` block in ``resources/bundle.{emir,mifir}_resources.yml``.
-
-Reference: docs/superpowers/specs/2026-05-11-sdp-xml-loader-design.md
 """
 
 from __future__ import annotations

@@ -63,8 +63,7 @@ esma_xml_ingestion/
 │   └── util/
 │       └── xsd_processor.py                # XSD parsing helpers (Python)
 ├── fixtures/                               # Sample data and test files
-├── scratch/                                # Development workspace
-└── docs/superpowers/                       # Specs and implementation plans
+└── scratch/                                # Development workspace
 ```
 
 ### Key Components
@@ -77,7 +76,7 @@ esma_xml_ingestion/
   - `silver_mifir.py` — domain silver for MiFIR (`transaction`, `transaction_party`, `submission_file`)
 - **`src/notebooks/`**:
   - `0_1_xml_schema_xsd.py` — **active**: one-time XSD → JSON schema + row-tag XSD conversion (Schema Prep step consumed by the SDP loader)
-  - `1_xml_file_loader_body.py`, `2_flatten_explode_table.py` — **legacy**: original notebook-based ingest + generic flatten, superseded by `src/pipelines/xml_loader.py` and the per-regime silver pipelines. Preserved as a reference; see `docs/superpowers/plans/2026-05-19-flatten-sdp-conversion.md` for the planned conversion of the flatten step to SDP. Full pre-SDP repo on the `legacy/notebook-approach` branch.
+  - `1_xml_file_loader_body.py`, `2_flatten_explode_table.py` — **legacy**: original notebook-based ingest + generic flatten, superseded by `src/pipelines/xml_loader.py` and the per-regime silver pipelines. Preserved as a reference. Full pre-SDP repo on the [`legacy/notebook-approach`](https://github.com/databricks-industry-solutions/esma_xml_ingestion/tree/legacy/notebook-approach) branch.
 - **`src/util/`**: Python helpers for XSD processing
 
 ## How the accelerator handles ESMA XML

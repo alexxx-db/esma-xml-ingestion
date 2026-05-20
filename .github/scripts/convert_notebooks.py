@@ -226,10 +226,13 @@ def convert_to_html_fragment(filepath):
 
 
 if __name__ == "__main__":
-    # Process all .py files in src directory (your notebooks are there)
+    # Process all Databricks .py notebooks under src/notebooks/.
+    # SDP pipelines under src/pipelines/ are standard Python modules
+    # (no `# COMMAND ----------` / `# MAGIC %md` markers) — they're
+    # intentionally NOT rendered here; the README links to them on GitHub.
     notebook_data = {}
     notebook_headers = {}
-    for py_file in glob.glob('src/*.py'):
+    for py_file in glob.glob('src/notebooks/*.py'):
         if not py_file.endswith('__init__.py'):  # Skip __init__.py files
             name, fragment, headers = convert_to_html_fragment(py_file)
             notebook_data[name] = fragment
