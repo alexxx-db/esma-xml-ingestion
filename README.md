@@ -46,37 +46,38 @@ esma_xml_ingestion/
 ├── databricks.yml                          # Main bundle config
 ├── resources/
 │   ├── bundle.variables.yml                # Shared variables
-│   ├── bundle.emir_resources.yml           # EMIR jobs + SDP pipeline
-│   ├── bundle.mifir_resources.yml          # MiFIR jobs + SDP pipeline
+│   ├── bundle.emir_resources.yml           # EMIR Schema Prep job + SDP pipelines
+│   ├── bundle.mifir_resources.yml          # MiFIR Schema Prep job + SDP pipelines
 │   ├── bundle.new-type_resources.yml.template
 │   └── config/
 │       └── local/                          # git-ignored per-developer overrides
 │           └── dev-variables.yml.template
 ├── src/
-│   ├── notebooks/                          # Classic notebooks (jobs)
-│   │   ├── 0_1_xml_schema_xsd.py           # XSD → JSON Spark schemas
-│   │   ├── 1_xml_file_loader_body.py       # (legacy reference — replaced by SDP)
-│   │   └── 2_flatten_explode_table.py      # Flatten + explode → bronze
+│   ├── notebooks/
+│   │   └── 0_1_xml_schema_xsd.py           # Schema Prep: XSD → JSON Spark schemas + row-tag XSD
 │   ├── pipelines/                          # Spark Declarative Pipelines
-│   │   ├── xml_loader.py                   # Bronze: parameterized SDP for EMIR + MiFIR XML ingest
-│   │   └── silver_emir.py                  # Silver: domain-driven EMIR REFIT (trade + schedule + beneficiary + submission_file)
+│   │   ├── xml_loader.py                   # Bronze: parameterised SDP for any ESMA regime
+│   │   ├── silver_emir.py                  # Silver — EMIR REFIT domain tables
+│   │   └── silver_mifir.py                 # Silver — MiFIR domain tables
 │   └── util/
 │       └── xsd_processor.py                # XSD parsing helpers (Python)
 ├── fixtures/                               # Sample data and test files
 └── scratch/                                # Development workspace
 ```
 
+> The original notebook-based ingest is preserved unchanged on the
+> [`legacy/notebook-approach`](https://github.com/databricks-industry-solutions/esma_xml_ingestion/tree/legacy/notebook-approach)
+> branch for historical reference. `main` is SDP-only.
+
 ### Key Components
 
 - **`databricks.yml`**: Main bundle configuration that defines deployment targets and includes resource files
-- **`resources/`**: Per-regulation jobs and SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
+- **`resources/`**: Per-regulation Schema Prep jobs + SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
 - **`src/pipelines/`**: Spark Declarative Pipelines —
   - `xml_loader.py` — parameterised bronze for any ESMA regime (XML ingest → `{prefix}_raw` + `{prefix}_quarantine`)
   - `silver_emir.py` — domain silver for EMIR REFIT (`trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`)
   - `silver_mifir.py` — domain silver for MiFIR (`transaction`, `transaction_party`, `submission_file`)
-- **`src/notebooks/`**:
-  - `0_1_xml_schema_xsd.py` — **active**: one-time XSD → JSON schema + row-tag XSD conversion (Schema Prep step consumed by the SDP loader)
-  - `1_xml_file_loader_body.py`, `2_flatten_explode_table.py` — **legacy**: original notebook-based ingest + generic flatten, superseded by `src/pipelines/xml_loader.py` and the per-regime silver pipelines. Preserved as a reference. Full pre-SDP repo on the [`legacy/notebook-approach`](https://github.com/databricks-industry-solutions/esma_xml_ingestion/tree/legacy/notebook-approach) branch.
+- **`src/notebooks/`**: `0_1_xml_schema_xsd.py` — one-time XSD → JSON schema + row-tag XSD conversion (Schema Prep step consumed by the SDP loader).
 - **`src/util/`**: Python helpers for XSD processing
 
 ## How the accelerator handles ESMA XML

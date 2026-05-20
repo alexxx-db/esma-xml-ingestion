@@ -20,33 +20,8 @@
 
 resources:
 
-  # === Classic Notebook Jobs ===
+  # === Schema Prep Job (one-time XSD -> JSON for the SDP loader) ===
   jobs:
-    NEW_TYPE_XML_Processing:
-      name: "NEW_TYPE XML Processing"
-      max_concurrent_runs: ${var.new-type_max_concurrent_runs}
-
-      tasks:
-        - task_key: new-type_xml_flatten
-          notebook_task:
-            notebook_path: ../src/notebooks/2_flatten_explode_table.py
-            source: WORKSPACE
-
-      queue:
-        enabled: true
-
-      parameters:
-        - name: table_prefix
-          default: "${var.new-type_table_prefix}"
-        - name: catalog
-          default: "${var.new-type_catalog}"
-        - name: raw_schema
-          default: "${var.new-type_raw_schema}"
-        - name: bronze_schema
-          default: "${var.new-type_bronze_schema}"
-        - name: checkpoint_path
-          default: "${var.new-type_checkpoint_path}"
-
     NEW_TYPE_Schema_Creation:
       name: "NEW_TYPE Schema Creation"
       max_concurrent_runs: ${var.new-type_schema_max_concurrent_runs}

@@ -135,10 +135,10 @@ For prod deployments, switch the target: `--target prod`. The `databricks.yml` f
 
 ## What lives where
 
-- `src/pipelines/` — Spark Declarative Pipelines (bronze loader + per-regime silver). The active architecture.
-- `src/notebooks/` — Schema Prep notebook (active) plus two legacy notebooks preserved for reference.
+- `src/pipelines/` — Spark Declarative Pipelines (bronze loader + per-regime silver). The active architecture on `main`.
+- `src/notebooks/` — `0_1_xml_schema_xsd.py`, the Schema Prep notebook (one-time XSD → JSON conversion consumed by the SDP loader). The original notebook-based ingest / flatten approach is preserved on the [`legacy/notebook-approach`](https://github.com/databricks-industry-solutions/esma_xml_ingestion/tree/legacy/notebook-approach) branch.
 - `src/util/` — Python helpers (XSD processing).
-- `resources/` — DAB resource definitions (per-regime jobs + pipelines), shared variables, and a template for new regulations.
+- `resources/` — DAB resource definitions (per-regime Schema Prep jobs + SDP pipelines), shared variables, and a template for new regulations.
 - `.github/workflows/` — CI for bundle validation/deploy, and GitHub Pages publishing.
 - `scripts/cleanup.sh` — wipe the deployed bundle from a workspace.
 
