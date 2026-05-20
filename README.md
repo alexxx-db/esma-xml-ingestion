@@ -75,6 +75,84 @@ esma_xml_ingestion/
 - **`src/notebooks/`**: Classic notebooks for XSD-to-schema preparation and the flatten/explode bronze step
 - **`src/util/`**: Python helpers for XSD processing
 
+## How the accelerator handles ESMA XML
+
+### What an ESMA submission looks like
+
+Every ESMA reporting regime (EMIR REFIT, MiFIR, SFTR, CSDR, MAR/STOR) shares
+the same technical foundation: **ISO 20022 XML, defined by deeply nested
+XSD schemas, in files up to 2 GB+**. Each file has two parts:
+
+- A **Business Application Header (BAH)** — sender LEI, recipient LEI,
+  message ID, message definition (e.g., `auth.030.001.03` for EMIR REFIT
+  derivative trades), creation timestamp.
+- A **Document payload** — a deeply nested tree (30+ levels, hundreds of
+  optional fields) containing many repeating row elements (`<Rpt>`, `<Tx>`,
+  `<Stat>`, etc.) — one per transaction.
+
+The XSD that defines each regime is the regulator's contract: typed fields,
+enumerations, regex restrictions. Every REFIT changes both fields and
+structure, so the pipeline has to handle schema evolution as a first-class
+concern.
+
+### Two-part processing — payload + header
+
+Spark's XML reader is great at streaming a file as a sequence of row-tag
+elements (one Spark row per `<Rpt>`), but it stumbles on the surrounding
+envelope (BAH / `Document`) — because of cross-namespace XSD imports, XML
+entity references, and the fact that XSD validation in Spark works
+per-element, not per-document. Reading the full file in one pass either
+loses the header or breaks on the deep, namespaced envelope.
+
+The accelerator handles this by reading each file as **two views of the
+same bytes**:
+
+1. **Payload reader** — Auto Loader with `rowTag="Rpt"` (or `Stat`, `Tx`
+   per regime), validated against a **row-tag-scoped XSD** that's free of
+   cross-namespace imports. Streams the bulk of the data, row by row.
+2. **Header extractor** — a small LXML UDF that runs **once per file**,
+   reads only up to the first row tag, and returns the BAH + Document
+   header as a clean struct via `from_xml`.
+
+Both streams join on `file_path`, producing **`{regime}_raw`** (payload +
+header columns, ready for silver) and **`{regime}_quarantine`** (XSD-invalid
+rows, annotated with a human-readable validation error).
+
+### Things to know before deploying
+
+- **Processed files are archived via Auto Loader `cleanSource=MOVE`** by
+  default — after the configured retention window (`7 days`),
+  successfully-processed files are moved from the landing path to the
+  per-regime `processed/` path. Both the mode (`OFF` / `MOVE` / `DELETE`)
+  and the retention duration are tunable per regime via DAB variables
+  (`*_clean_source_mode`, `*_clean_source_retention`). The retention is
+  intentionally long enough that the downstream LXML header re-read —
+  which fires within seconds of the upstream Auto Loader commit — always
+  finds the file at source. `moveDestination` must be in the same UC
+  volume / external location as the landing path; cross-bucket moves are
+  rejected by Auto Loader.
+- **Schema Prep is a one-time step per regime/REFIT.** Re-run
+  `0_1_xml_schema_xsd.py` whenever ESMA publishes a new XSD version.
+- **XSD validation is per-row.** Document-level constraints (e.g., counts
+  in the header vs. actual rows) should be added as silver-layer quality
+  checks for your use case. The row-level toggle is exposed as
+  `*_enable_xsd_validation` and defaults to `true`.
+- **LXML / libxml2** is a runtime dependency, declared in the SDP
+  pipeline environment (`lxml==5.3.0`). Already present on standard
+  Databricks Runtime; confirm if deploying to a stripped-down image.
+  Serverless UDFs have a 1 GB memory cap per invocation — our header
+  extractor uses `iterparse` and stops at the first row tag, so it's
+  safely bounded.
+- **SDP pipelines run on `channel: CURRENT`** for production stability.
+  Override per-target in `databricks.yml` if you want a specific
+  environment to track the `PREVIEW` channel for early access to new
+  features.
+
+> For implementation details — the bronze SDP, per-regime silver, and the
+> Schema Prep step — review the source in
+> [`src/pipelines/`](src/pipelines/) and
+> [`src/notebooks/`](src/notebooks/).
+
 ## Prerequisites
 
 Before deploying this solution, ensure the following prerequisites are met:

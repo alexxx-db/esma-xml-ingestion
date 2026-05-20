@@ -79,7 +79,7 @@ resources:
       catalog: ${var.new-type_catalog}
       schema: ${var.new-type_raw_schema}
       serverless: true
-      channel: PREVIEW
+      channel: CURRENT
       development: false
       photon: true
       continuous: false

@@ -73,7 +73,7 @@ resources:
       catalog: ${var.emir_catalog}
       schema: ${var.emir_raw_schema}
       serverless: true
-      channel: PREVIEW
+      channel: CURRENT
       development: false
       photon: true
       continuous: false
@@ -106,7 +106,7 @@ resources:
       catalog: ${var.emir_catalog}
       schema: ${var.emir_raw_schema}
       serverless: true
-      channel: PREVIEW
+      channel: CURRENT
       development: false
       photon: true
       continuous: false
