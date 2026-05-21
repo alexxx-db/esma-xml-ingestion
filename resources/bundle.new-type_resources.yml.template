@@ -60,7 +60,7 @@ resources:
       continuous: false
 
       libraries:
-        - file:
+        - notebook:
             path: ../src/pipelines/xml_loader.py
 
       environment:

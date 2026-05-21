@@ -42,7 +42,7 @@ resources:
       continuous: false
 
       libraries:
-        - file:
+        - notebook:
             path: ../src/pipelines/xml_loader.py
 
       environment:
@@ -75,7 +75,7 @@ resources:
       continuous: false
 
       libraries:
-        - file:
+        - notebook:
             path: ../src/pipelines/silver_emir.py
 
       configuration:
