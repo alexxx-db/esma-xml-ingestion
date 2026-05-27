@@ -74,7 +74,7 @@ esma_xml_ingestion/
 - **`databricks.yml`**: Main bundle configuration that defines deployment targets and includes resource files
 - **`resources/`**: Per-regulation Schema Prep jobs + SDP pipelines (EMIR, MiFIR), shared variables, and per-developer local overrides
 - **`src/pipelines/`**: Spark Declarative Pipelines —
-  - `xml_loader.py` — parameterised bronze for any ESMA regime (XML ingest → `{prefix}_raw` + `{prefix}_quarantine`)
+  - `xml_loader.py` — parameterised bronze for any ESMA regime (XML ingest → `{prefix}_raw` + `{prefix}_quarantine` + `{prefix}_file_headers`)
   - `silver_emir.py` — domain silver for EMIR REFIT (`trade`, `trade_schedule`, `trade_beneficiary`, `submission_file`)
   - `silver_mifir.py` — domain silver for MiFIR (`transaction`, `transaction_party`, `submission_file`)
 - **`src/notebooks/`**: `0_1_xml_schema_xsd.py` — one-time XSD → JSON schema + row-tag XSD conversion (Schema Prep step consumed by the SDP loader).
@@ -119,23 +119,36 @@ same bytes**:
    reads only up to the first row tag, and returns the BAH + Document
    header as a clean struct via `from_xml`.
 
-Both streams join on `file_path`, producing **`{regime}_raw`** (payload +
-header columns, ready for silver) and **`{regime}_quarantine`** (XSD-invalid
-rows, annotated with a human-readable validation error).
+Bronze writes three tables, each with a single concern:
+- **`{regime}_raw`** — every Auto Loader row (good + bad), payload columns
+  parsed against the row-tag JSON schema, plus `corrupted_record` /
+  `rescued_data` populated on malformed rows.
+- **`{regime}_file_headers`** — one row per ingested file, with the
+  LXML-extracted `hdr_pyld_metadata` struct (BAH + Document header) and the
+  filename-regex columns (`FileBatchIndex` / `FileBatchSize` / `FileVersion`
+  / `ESMADate`).
+- **`{regime}_quarantine`** — bad rows filtered from `{regime}_raw`,
+  annotated with a human-readable XSD-validation error.
+
+Silver joins `{regime}_raw` and `{regime}_file_headers` on `file_path`
+only when a downstream table needs header context — `submission_file`
+reads `file_headers` directly (one row per file, no payload scan);
+per-row silver tables read `raw` directly and don't denormalize header
+fields (consumers `JOIN submission_file USING (file_path)` when they
+want envelope information).
 
 ### Things to know before deploying
 
-- **Processed files are archived via Auto Loader `cleanSource=MOVE`** by
-  default — after the configured retention window (`7 days`),
-  successfully-processed files are moved from the landing path to the
-  per-regime `processed/` path. Both the mode (`OFF` / `MOVE` / `DELETE`)
-  and the retention duration are tunable per regime via DAB variables
-  (`*_clean_source_mode`, `*_clean_source_retention`). The retention is
-  intentionally long enough that the downstream LXML header re-read —
-  which fires within seconds of the upstream Auto Loader commit — always
-  finds the file at source. `moveDestination` must be in the same UC
-  volume / external location as the landing path; cross-bucket moves are
-  rejected by Auto Loader.
+- **Auto Loader `cleanSource` defaults to `OFF`** — processed files stay
+  in the landing path so they can be reprocessed on a full refresh. Set
+  `*_clean_source_mode` to `MOVE` (archive to per-regime `processed/`)
+  or `DELETE` to enable cleanup; `*_clean_source_retention` controls the
+  wait between processing and cleanup eligibility (default `7 days`).
+  The retention window must be long enough that the downstream LXML
+  header re-read (which fires within seconds of the upstream Auto Loader
+  commit) still finds the file at source. `moveDestination` must be in
+  the same UC volume / external location as the landing path;
+  cross-bucket moves are rejected by Auto Loader.
 - **Schema Prep is a one-time step per regime/REFIT.** Re-run
   `0_1_xml_schema_xsd.py` whenever ESMA publishes a new XSD version.
 - **XSD validation is per-row.** Document-level constraints (e.g., counts

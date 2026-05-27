@@ -83,4 +83,5 @@ resources:
         raw_schema: ${var.emir_raw_schema}
         silver_schema: ${var.emir_raw_schema}
         bronze_table: ${var.emir_table_prefix}_raw
+        file_headers_table: ${var.emir_table_prefix}_file_headers
         regulation: "EMIR"

@@ -83,5 +83,6 @@ resources:
         raw_schema: ${var.mifir_raw_schema}
         silver_schema: ${var.mifir_raw_schema}
         bronze_table: ${var.mifir_table_prefix}_raw
+        file_headers_table: ${var.mifir_table_prefix}_file_headers
         regulation: "MIFIR"
         enable_filename_regex: "true"

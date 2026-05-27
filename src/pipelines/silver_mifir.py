@@ -1,27 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ESMA MiFIR Transaction-Reporting Silver Layer
-# MAGIC
-# MAGIC Domain-driven silver layer on top of bronze `mifir_raw`
-# MAGIC (auth.016.001.01_ESMAUG_Reporting). Three tables:
-# MAGIC
-# MAGIC * `transaction` — wide-flat fact table, one row per `<Tx>` element
-# MAGIC   with `action_type` discriminator (NEW / CXL). ~135 scalars +
-# MAGIC   ~15 array columns covering identification, buyer/seller flat,
-# MAGIC   trade details, instrument + 6 underlying-instrument prefix groups,
-# MAGIC   investment-decision person, executing person, additional attributes,
-# MAGIC   audit.
-# MAGIC * `transaction_party` — unified explode of Buyr.AcctOwnr +
-# MAGIC   Buyr.DcsnMakr + Sellr.AcctOwnr + Sellr.DcsnMakr with side and
-# MAGIC   party_role discriminators. ~18 cols.
-# MAGIC * `submission_file` — MiFIR-specific envelope including UVHeader
-# MAGIC   (UnaVista vendor wrapper) + full BizAppHeader (AppHdr top-level +
-# MAGIC   Sender/Recipient OrgId + FIId blocks + 135-leaf Rltd related-
-# MAGIC   message mirror). ~270 cols.
-# MAGIC
-# MAGIC All inputs are supplied via `spark.conf` — see the MiFIR silver
-# MAGIC pipeline `configuration` block in
-# MAGIC `resources/bundle.mifir_resources.yml`.
+# MAGIC # MiFIR Transaction Reporting — Silver SDP
+# MAGIC Domain tables over bronze `mifir_raw` (auth.016.001.01):
+# MAGIC `transaction` (wide-flat, ~135 cols, NEW/CXL discriminator) ·
+# MAGIC `transaction_party` (unified Buyr/Sellr × AcctOwnr/DcsnMakr explode) ·
+# MAGIC `submission_file` (UVHeader + BizAppHeader, ~270 cols).
+# MAGIC Config via `spark.conf` (see `resources/bundle.mifir_resources.yml`).
 
 # COMMAND ----------
 
@@ -34,37 +18,29 @@ from pyspark.sql import DataFrame
 
 # MAGIC %md
 # MAGIC ## Pipeline configuration
-# MAGIC
-# MAGIC Values are set in `resources/bundle.mifir_resources.yml` under
-# MAGIC `resources.pipelines.mifir_silver_pipeline.configuration`.
+# MAGIC From `resources/bundle.mifir_resources.yml` (silver pipeline `configuration`).
 
 # COMMAND ----------
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
 BRONZE_TABLE_NAME = spark.conf.get("bronze_table")
+FILE_HEADERS_TABLE_NAME = spark.conf.get("file_headers_table")
 REGULATION = spark.conf.get("regulation", "MIFIR")
 ENABLE_FILENAME_REGEX = spark.conf.get("enable_filename_regex", "true").lower() == "true"
 
 TBL_BRONZE = f"{CATALOG}.{RAW_SCHEMA}.{BRONZE_TABLE_NAME}"
+TBL_FILE_HEADERS = f"{CATALOG}.{RAW_SCHEMA}.{FILE_HEADERS_TABLE_NAME}"
 TBL_TRANSACTION = f"{CATALOG}.{SILVER_SCHEMA}.transaction"
 TBL_TRANSACTION_PARTY = f"{CATALOG}.{SILVER_SCHEMA}.transaction_party"
 TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Filename regex extraction (customer-replaceable).
-# MAGIC
-# MAGIC Default MiFIR convention (e.g., 9795_20250729154019_3_sample_data.xml):
-# MAGIC   <client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml
-# MAGIC
-# MAGIC TODO (customer): customers with a different filename convention should
-# MAGIC REPLACE THIS FUNCTION rather than editing the @dp.table definitions.
-# MAGIC The four output column names must stay the same so downstream consumers
-# MAGIC keep working; the extraction logic inside is yours to redefine.
-# MAGIC
-# MAGIC Set ENABLE_FILENAME_REGEX=false to skip extraction entirely (columns
-# MAGIC emit NULL while preserving the schema).
+# MAGIC ## Filename regex extraction
+# MAGIC Customer-replaceable. Default parses the UnaVista MiFIR convention
+# MAGIC `<client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml`.
+# MAGIC Keep the four output column names; redefine the logic for other regimes.
 
 # COMMAND ----------
 _MIFIR_CLIENT_ID_PATTERN = r"^(\d+)_"
@@ -73,15 +49,8 @@ _MIFIR_SEQUENCE_PATTERN = r"^\d+_\d{14}_(\d+)_"
 
 
 def _add_filename_regex_columns(df: DataFrame) -> DataFrame:
-    """Add MiFIR filename-derived columns to a DataFrame with a ``file_name`` column.
-
-    Returns the DataFrame with four columns appended:
-    ``client_id_from_filename``, ``filename_timestamp``,
-    ``filename_timestamp_parsed``, ``filename_sequence``.
-
-    Default implementation parses the UnaVista MiFIR convention:
-    ``<client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml``.
-    """
+    """Append `client_id_from_filename` / `filename_timestamp` / `..._parsed` / `..._sequence`
+    from `<client_id>_<YYYYMMDDhhmmss>_<sequence>_*.xml` (UnaVista MiFIR convention)."""
     if not ENABLE_FILENAME_REGEX:
         return (
             df
@@ -115,12 +84,7 @@ def _add_filename_regex_columns(df: DataFrame) -> DataFrame:
 
 
 def _reporting_date(df: DataFrame) -> DataFrame:
-    """Add a ``reporting_date`` DATE column derived from the filename timestamp.
-
-    Falls back to the file modification time if the filename timestamp
-    couldn't be parsed (e.g., a non-default filename convention with the
-    regex toggle off).
-    """
+    """Add `reporting_date` DATE from `filename_timestamp_parsed`, fallback to file mtime."""
     return df.withColumn(
         "reporting_date",
         F.coalesce(
@@ -131,12 +95,9 @@ def _reporting_date(df: DataFrame) -> DataFrame:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
-# MAGIC
-# MAGIC Built incrementally — each subsequent commit adds one logical section.
-# MAGIC Final shape: ~270 columns covering UVHeader + full BizAppHeader (AppHdr
-# MAGIC top-level + Sender Fr.OrgId/FIId + Recipient To.OrgId/FIId + Rltd
-# MAGIC related-message mirror) per spec §4.3.
+# MAGIC ## Table 1 of 3: `submission_file`
+# MAGIC ~270 cols covering UVHeader + BizAppHeader (AppHdr + Sender/Recipient
+# MAGIC OrgId/FIId + Rltd mirror). MiFIR-specific.
 
 # COMMAND ----------
 @dp.table(
@@ -150,11 +111,14 @@ def _reporting_date(df: DataFrame) -> DataFrame:
     cluster_by_auto=True,
 )
 def submission_file():
+    # Reads directly from {prefix}_file_headers (already one row per file) — no
+    # payload scan, no dedup needed. UnaVista MiFIR filename-regex columns are
+    # added here in silver since bronze's file_headers applies the ESMA-convention
+    # regex which doesn't match MiFIR filenames.
     return (
         _reporting_date(_add_filename_regex_columns(
-            spark.readStream.table(TBL_BRONZE)
+            spark.readStream.table(TBL_FILE_HEADERS)
         ))
-        .dropDuplicates(["file_path"])
         .select(
             # File metadata (~10 cols)
             F.col("file_path"),
@@ -560,11 +524,9 @@ def submission_file():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Table 2 of 3: transaction_party (unified party explode)
-# MAGIC
-# MAGIC Built via four posexplode_outer operations (one per array), unioned
-# MAGIC with side ∈ {BUYER, SELLER} and party_role ∈ {ACCT_OWNR, DCSN_MAKR}
-# MAGIC discriminators. Filtered to drop NULL rows from posexplode_outer.
+# MAGIC ## Table 2 of 3: `transaction_party`
+# MAGIC Four `posexplode_outer` ops unioned, with `side` ∈ {BUYER, SELLER}
+# MAGIC and `party_role` ∈ {ACCT_OWNR, DCSN_MAKR} discriminators.
 
 # COMMAND ----------
 @dp.table(
@@ -681,12 +643,9 @@ def transaction_party():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)
-# MAGIC
-# MAGIC One row per <Tx> element. action_type discriminator: NEW (full
-# MAGIC transaction with all fields) or CXL (cancellation, 3 shared fields
-# MAGIC only — rest NULL). Built incrementally — each subsequent commit adds
-# MAGIC one logical XSD section's columns to the .select(...) below.
+# MAGIC ## Table 3 of 3: `transaction`
+# MAGIC Wide-flat fact, ~135 scalars + ~15 arrays. One row per `<Tx>`.
+# MAGIC `action_type` ∈ {NEW (full), CXL (cancel, only 3 shared fields populated)}.
 
 # COMMAND ----------
 @dp.table(
