@@ -1,4 +1,11 @@
-"""ESMA MiFIR Transaction-Reporting Silver Layer.
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # MiFIR Transaction Reporting — Silver SDP
+# MAGIC Domain tables over bronze `mifir_raw` (auth.016.001.01):
+# MAGIC `transaction` (wide-flat, ~135 cols, NEW/CXL discriminator) ·
+# MAGIC `transaction_party` (unified Buyr/Sellr × AcctOwnr/DcsnMakr explode) ·
+# MAGIC `submission_file` (UVHeader + BizAppHeader, ~270 cols).
+# MAGIC Config via `spark.conf` (see `resources/bundle.mifir_resources.yml`).
 
 Domain-driven silver layer on top of bronze ``mifir_raw``
 (auth.016.001.01_ESMAUG_Reporting). Three tables:
@@ -28,23 +35,29 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
 
-# --------------------------------------------------------------------------
-# Pipeline configuration (set in resources/bundle.mifir_resources.yml under
-# resources.pipelines.mifir_silver_pipeline.configuration).
-# --------------------------------------------------------------------------
+# MAGIC %md
+# MAGIC ## Pipeline configuration
+# MAGIC From `resources/bundle.mifir_resources.yml` (silver pipeline `configuration`).
 
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
 BRONZE_TABLE_NAME = spark.conf.get("bronze_table")
+FILE_HEADERS_TABLE_NAME = spark.conf.get("file_headers_table")
 REGULATION = spark.conf.get("regulation", "MIFIR")
 ENABLE_FILENAME_REGEX = spark.conf.get("enable_filename_regex", "true").lower() == "true"
 
 TBL_BRONZE = f"{CATALOG}.{RAW_SCHEMA}.{BRONZE_TABLE_NAME}"
+TBL_FILE_HEADERS = f"{CATALOG}.{RAW_SCHEMA}.{FILE_HEADERS_TABLE_NAME}"
 TBL_TRANSACTION = f"{CATALOG}.{SILVER_SCHEMA}.transaction"
 TBL_TRANSACTION_PARTY = f"{CATALOG}.{SILVER_SCHEMA}.transaction_party"
 TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
 
+# MAGIC %md
+# MAGIC ## Filename regex extraction
+# MAGIC Customer-replaceable. Default parses the UnaVista MiFIR convention
+# MAGIC `<client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml`.
+# MAGIC Keep the four output column names; redefine the logic for other regimes.
 
 # --------------------------------------------------------------------------
 # Filename regex extraction (customer-replaceable).
@@ -67,15 +80,8 @@ _MIFIR_SEQUENCE_PATTERN = r"^\d+_\d{14}_(\d+)_"
 
 
 def _add_filename_regex_columns(df: DataFrame) -> DataFrame:
-    """Add MiFIR filename-derived columns to a DataFrame with a ``file_name`` column.
-
-    Returns the DataFrame with four columns appended:
-    ``client_id_from_filename``, ``filename_timestamp``,
-    ``filename_timestamp_parsed``, ``filename_sequence``.
-
-    Default implementation parses the UnaVista MiFIR convention:
-    ``<client_id>_<YYYYMMDDhhmmss>_<sequence>_<rest>.xml``.
-    """
+    """Append `client_id_from_filename` / `filename_timestamp` / `..._parsed` / `..._sequence`
+    from `<client_id>_<YYYYMMDDhhmmss>_<sequence>_*.xml` (UnaVista MiFIR convention)."""
     if not ENABLE_FILENAME_REGEX:
         return (
             df
@@ -109,12 +115,7 @@ def _add_filename_regex_columns(df: DataFrame) -> DataFrame:
 
 
 def _reporting_date(df: DataFrame) -> DataFrame:
-    """Add a ``reporting_date`` DATE column derived from the filename timestamp.
-
-    Falls back to the file modification time if the filename timestamp
-    couldn't be parsed (e.g., a non-default filename convention with the
-    regex toggle off).
-    """
+    """Add `reporting_date` DATE from `filename_timestamp_parsed`, fallback to file mtime."""
     return df.withColumn(
         "reporting_date",
         F.coalesce(
@@ -123,6 +124,10 @@ def _reporting_date(df: DataFrame) -> DataFrame:
         ),
     )
 
+# MAGIC %md
+# MAGIC ## Table 1 of 3: `submission_file`
+# MAGIC ~270 cols covering UVHeader + BizAppHeader (AppHdr + Sender/Recipient
+# MAGIC OrgId/FIId + Rltd mirror). MiFIR-specific.
 
 # --------------------------------------------------------------------------
 # Table 1 of 3: submission_file (MiFIR-specific file-level envelope)
@@ -145,11 +150,14 @@ def _reporting_date(df: DataFrame) -> DataFrame:
     cluster_by_auto=True,
 )
 def submission_file():
+    # Reads directly from {prefix}_file_headers (already one row per file) — no
+    # payload scan, no dedup needed. UnaVista MiFIR filename-regex columns are
+    # added here in silver since bronze's file_headers applies the ESMA-convention
+    # regex which doesn't match MiFIR filenames.
     return (
         _reporting_date(_add_filename_regex_columns(
-            spark.readStream.table(TBL_BRONZE)
+            spark.readStream.table(TBL_FILE_HEADERS)
         ))
-        .dropDuplicates(["file_path"])
         .select(
             # File metadata (~10 cols)
             F.col("file_path"),
@@ -553,6 +561,10 @@ def submission_file():
         )
     )
 
+# MAGIC %md
+# MAGIC ## Table 2 of 3: `transaction_party`
+# MAGIC Four `posexplode_outer` ops unioned, with `side` ∈ {BUYER, SELLER}
+# MAGIC and `party_role` ∈ {ACCT_OWNR, DCSN_MAKR} discriminators.
 
 # --------------------------------------------------------------------------
 # Table 2 of 3: transaction_party (unified party explode)
@@ -675,6 +687,10 @@ def transaction_party():
         .unionByName(_explode_dcsn_makr("SELLER", "New.Sellr.DcsnMakr"), allowMissingColumns=True)
     )
 
+# MAGIC %md
+# MAGIC ## Table 3 of 3: `transaction`
+# MAGIC Wide-flat fact, ~135 scalars + ~15 arrays. One row per `<Tx>`.
+# MAGIC `action_type` ∈ {NEW (full), CXL (cancel, only 3 shared fields populated)}.
 
 # --------------------------------------------------------------------------
 # Table 3 of 3: transaction (main fact, ~135 scalars + ~15 arrays)

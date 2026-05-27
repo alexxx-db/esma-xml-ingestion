@@ -1,4 +1,10 @@
-"""ESMA EMIR REFIT DAT TSR Silver Layer.
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # EMIR REFIT — Silver SDP
+# MAGIC Domain tables over bronze `emir_raw`:
+# MAGIC `trade` (wide-flat, ~232 cols) · `trade_schedule` (unified schedule periods)
+# MAGIC · `trade_beneficiary` (exploded) · `submission_file` (per-file envelope).
+# MAGIC Config via `spark.conf` (see `resources/bundle.emir_resources.yml`).
 
 Domain-driven silver layer on top of bronze ``emir_raw``. Four tables:
 
@@ -21,30 +27,28 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 from pyspark.sql import DataFrame
 
-# --------------------------------------------------------------------------
-# Pipeline configuration (set in resources/bundle.emir_resources.yml under
-# resources.pipelines.emir_silver_pipeline.configuration).
-# --------------------------------------------------------------------------
+# MAGIC %md
+# MAGIC ## Pipeline configuration
+# MAGIC From `resources/bundle.emir_resources.yml` (silver pipeline `configuration`).
 
 CATALOG = spark.conf.get("catalog")
 RAW_SCHEMA = spark.conf.get("raw_schema")
 SILVER_SCHEMA = spark.conf.get("silver_schema", RAW_SCHEMA)
 BRONZE_TABLE_NAME = spark.conf.get("bronze_table")
+FILE_HEADERS_TABLE_NAME = spark.conf.get("file_headers_table")
 REGULATION = spark.conf.get("regulation", "EMIR")
 
 TBL_BRONZE = f"{CATALOG}.{RAW_SCHEMA}.{BRONZE_TABLE_NAME}"
+TBL_FILE_HEADERS = f"{CATALOG}.{RAW_SCHEMA}.{FILE_HEADERS_TABLE_NAME}"
 TBL_TRADE = f"{CATALOG}.{SILVER_SCHEMA}.trade"
 TBL_TRADE_SCHEDULE = f"{CATALOG}.{SILVER_SCHEMA}.trade_schedule"
 TBL_TRADE_BENEFICIARY = f"{CATALOG}.{SILVER_SCHEMA}.trade_beneficiary"
 TBL_SUBMISSION_FILE = f"{CATALOG}.{SILVER_SCHEMA}.submission_file"
 
 
-def _reporting_date(df: DataFrame) -> DataFrame:
-    """Add a reporting_date DATE column parsed from ESMADate or filename.
-
-    ESMADate from the bronze regex is in 'YY-MM-DD' format (e.g.,
-    '24-12-15'). Convert to a proper DATE assuming 20YY century.
-    """
+def _reporting_date_from_headers(df: DataFrame) -> DataFrame:
+    """Add `reporting_date` DATE from `ESMADate` ('YY-MM-DD', 20YY century) or file mtime.
+    Used by `submission_file` (which reads from `file_headers` and has ESMADate)."""
     return df.withColumn(
         "reporting_date",
         F.when(
@@ -53,6 +57,18 @@ def _reporting_date(df: DataFrame) -> DataFrame:
         ).otherwise(F.to_date(F.col("_file_modification_time")))
     )
 
+
+def _reporting_date_from_raw(df: DataFrame) -> DataFrame:
+    """Add `reporting_date` DATE from file mtime. Used by per-row silver tables
+    (`trade`, `trade_schedule`, `trade_beneficiary`) which read from `emir_raw`
+    where the ESMADate filename-regex column is not present."""
+    return df.withColumn("reporting_date", F.to_date(F.col("_file_modification_time")))
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Table 1 of 4: `submission_file`
+# MAGIC Regulation-agnostic envelope. MiFIR writes to the same table with
+# MAGIC `regulation='MIFIR'` from its own silver pipeline.
 
 # --------------------------------------------------------------------------
 # Table 1 of 4: submission_file (file-level envelope)
@@ -66,15 +82,15 @@ def _reporting_date(df: DataFrame) -> DataFrame:
     name=TBL_SUBMISSION_FILE,
     comment=(
         "Public: one row per ingested ESMA XML file. Regulation-agnostic "
-        "envelope shared across EMIR/MiFIR. Built from a dropDuplicates "
-        "over the bronze stream."
+        "envelope shared across EMIR/MiFIR. Reads directly from "
+        "{prefix}_file_headers (already one row per file) — no need to "
+        "scan the payload bronze."
     ),
     cluster_by_auto=True,
 )
 def submission_file():
     return (
-        _reporting_date(spark.readStream.table(TBL_BRONZE))
-        .dropDuplicates(["file_path"])
+        _reporting_date_from_headers(spark.readStream.table(TBL_FILE_HEADERS))
         .select(
             F.col("file_path"),
             F.col("file_name"),
@@ -116,6 +132,9 @@ def submission_file():
         )
     )
 
+# MAGIC %md
+# MAGIC ## Table 2 of 4: `trade_beneficiary`
+# MAGIC Exploded `CtrPtySpcfcData.CtrPty.Bnfcry[]`; `beneficiary_type` ∈ LEGAL / NATURAL / OTHER.
 
 # --------------------------------------------------------------------------
 # Table 2 of 4: trade_beneficiary (exploded array)
@@ -132,7 +151,7 @@ def submission_file():
     cluster_by_auto=True,
 )
 def trade_beneficiary():
-    bronze = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    bronze = _reporting_date_from_raw(spark.readStream.table(TBL_BRONZE))
     exploded = (
         bronze
         .select(
@@ -158,6 +177,10 @@ def trade_beneficiary():
         F.current_timestamp().alias("silver_processed_at"),
     )
 
+# MAGIC %md
+# MAGIC ## Table 3 of 4: `trade_schedule`
+# MAGIC Six schedule arrays unified via `schedule_type` discriminator:
+# MAGIC PRICE / NTNL_AMT_LEG_1 / NTNL_AMT_LEG_2 / NTNL_QTY_LEG_1 / NTNL_QTY_LEG_2 / STRIKE.
 
 # --------------------------------------------------------------------------
 # Table 3 of 4: trade_schedule (six schedule arrays unified)
@@ -182,7 +205,7 @@ def trade_beneficiary():
     cluster_by_auto=True,
 )
 def trade_schedule():
-    bronze = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    bronze = _reporting_date_from_raw(spark.readStream.table(TBL_BRONZE))
     base = bronze.select(
         F.col("CmonTradData.TxData.TxId.UnqTxIdr").alias("trade_id"),
         F.col("reporting_date"),
@@ -285,6 +308,11 @@ def trade_schedule():
     )
     return unioned.withColumn("silver_processed_at", F.current_timestamp())
 
+# MAGIC %md
+# MAGIC ## Table 4 of 4: `trade`
+# MAGIC Wide-flat fact, ~232 scalar cols + 5 arrays + 1 struct. One row per
+# MAGIC `<Stat>` per snapshot. Choice fields collapsed to LEI + `*_other_id`
+# MAGIC fallback.
 
 # --------------------------------------------------------------------------
 # Table 4 of 4: trade (main fact, ~232 scalar cols + 5 arrays + 1 struct)
@@ -309,7 +337,7 @@ def trade_schedule():
     cluster_by_auto=True,
 )
 def trade():
-    src = _reporting_date(spark.readStream.table(TBL_BRONZE))
+    src = _reporting_date_from_raw(spark.readStream.table(TBL_BRONZE))
     cp = "CtrPtySpcfcData.CtrPty"
     txd = "CmonTradData.TxData"
     cd = "CmonTradData.CtrctData"
@@ -750,13 +778,9 @@ def trade():
 
         # === Reporting metadata ===
         F.col("CtrPtySpcfcData.RptgTmStmp").alias("reporting_ts"),
-        F.col("FileBatchIndex").cast("int").alias("batch_index"),
-        F.col("FileBatchSize").cast("int").alias("batch_size"),
-        F.col("FileVersion").cast("int").alias("file_version"),
-        F.col("hdr_pyld_metadata.Hdr.AppHdr.BizMsgIdr").alias("biz_msg_id"),
-        F.col("hdr_pyld_metadata.Hdr.AppHdr.Fr.OrgId.Id.OrgId.Othr.Id").alias("sender_lei"),
-        F.col("hdr_pyld_metadata.Hdr.AppHdr.To.OrgId.Id.OrgId.Othr.Id").alias("recipient_lei"),
-        F.col("hdr_pyld_metadata.Pyld.Document.DerivsTradStatRpt.TradData.DataSetActn").alias("data_set_action"),
+        # NOTE: file-level header context (batch_*, biz_msg_id, sender/recipient_lei,
+        # data_set_action) intentionally NOT denormalized here. Join to `submission_file`
+        # on `file_path` when those columns are needed by a downstream consumer.
 
         # === Audit / lineage ===
         F.col("reporting_date"),
